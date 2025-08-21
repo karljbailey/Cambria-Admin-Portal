@@ -1,5 +1,8 @@
 import { ResourceType, ActionType, PermissionLevel, UserPermissions, PermissionCheckResult } from './types';
 
+// Re-export types for convenience
+export type { ResourceType, ActionType, PermissionLevel, UserPermissions, PermissionCheckResult };
+
 // Default permissions for different user roles (client-side fallback)
 const DEFAULT_PERMISSIONS = {
   admin: {
