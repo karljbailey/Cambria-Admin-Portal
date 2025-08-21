@@ -1,13 +1,14 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import '@testing-library/jest-dom';
 import { useRBAC, withRBAC, usePageAccess } from '../../lib/hooks/useRBAC';
 import { rbacService } from '../../lib/rbac';
 import { ResourceType } from '../../lib/rbac';
 
 // Mock the RBAC service
-const mockGetUserPermissions = jest.fn();
-const mockClearUserCache = jest.fn();
+const mockGetUserPermissions = jest.fn() as jest.MockedFunction<any>;
+const mockClearUserCache = jest.fn() as jest.MockedFunction<any>;
 
 jest.mock('../../lib/rbac', () => ({
   rbacService: {

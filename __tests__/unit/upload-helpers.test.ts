@@ -130,7 +130,7 @@ describe('Upload Helper Functions Unit Tests', () => {
     });
 
     it('should handle undefined private key', () => {
-      const undefinedKey = undefined;
+      let undefinedKey: string | undefined;
       const processed = undefinedKey?.replace(/\\n/g, '\n');
       
       expect(processed).toBeUndefined();
