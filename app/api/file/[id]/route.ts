@@ -269,11 +269,15 @@ function extractWorksheetData(worksheet: unknown, tabName: string): unknown[][] 
             // Convert objects to arrays, maintaining key order
             const convertedData = [keys, ...rawData.map(obj => {
               return keys.map(key => {
-                const value = obj[key];
-                // Handle various data types consistently
-                if (value === null || value === undefined) return '';
-                if (typeof value === 'object') return JSON.stringify(value);
-                return String(value);
+                // Type guard to ensure obj is an object with string keys
+                if (obj && typeof obj === 'object' && key in obj) {
+                  const value = (obj as Record<string, unknown>)[key];
+                  // Handle various data types consistently
+                  if (value === null || value === undefined) return '';
+                  if (typeof value === 'object') return JSON.stringify(value);
+                  return String(value);
+                }
+                return '';
               });
             })];
             finalData = convertedData;
