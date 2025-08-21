@@ -6,10 +6,7 @@
   NODE_ENV = "production"
   NEXT_TELEMETRY_DISABLED = "1"
 
-# Functions configuration
-[functions]
-  # Increase function timeout for complex operations
-  timeout = 30
+
 
 # Headers for static assets
 [[headers]]
