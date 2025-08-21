@@ -110,6 +110,7 @@ export const AUDIT_ACTIONS = {
   UPDATE_PERMISSIONS: 'UPDATE_PERMISSIONS',
   CREATE_USER: 'CREATE_USER',
   DELETE_USER: 'DELETE_USER',
+  VIEW_USER: 'VIEW_USER',
   
   // System actions
   VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG',
@@ -232,6 +233,15 @@ export const auditHelpers = {
       resourceId: `user_${Date.now()}`,
       resourceName: userName,
       details: 'Deleted user account'
+    }),
+
+  userViewed: (userName: string, userEmail: string) =>
+    addAuditLog({
+      action: AUDIT_ACTIONS.VIEW_USER,
+      resource: AUDIT_RESOURCES.USER,
+      resourceId: `user_${Date.now()}`,
+      resourceName: userName,
+      details: `Viewed user profile: ${userEmail}`
     }),
 
   // System audit helpers
