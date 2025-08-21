@@ -131,7 +131,11 @@ export async function POST(request: NextRequest) {
       console.log('⚠️ Firebase not configured, using mock data');
       newUser = {
         id: (mockUsers.length + 1).toString(),
-        ...userData,
+        email: userData.email,
+        name: userData.name,
+        permissions: [role], // Convert role to permissions array
+        status: 'active',
+        lastLogin: new Date().toISOString(),
         createdAt: new Date().toISOString()
       };
       mockUsers.push(newUser);
