@@ -61,12 +61,14 @@ export const sendForgotPasswordEmail = async (
     console.error('Error sending forgot password email:', error);
     
     // Provide more specific error information
-    if (error.code === 'EAUTH') {
-      console.error('Authentication failed - check SMTP credentials');
-    } else if (error.code === 'ECONNECTION') {
-      console.error('Connection failed - check SMTP host and port');
-    } else if (error.code === 'ETIMEDOUT') {
-      console.error('Connection timeout - check network or SMTP settings');
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'EAUTH') {
+        console.error('Authentication failed - check SMTP credentials');
+      } else if (error.code === 'ECONNECTION') {
+        console.error('Connection failed - check SMTP host and port');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error('Connection timeout - check network or SMTP settings');
+      }
     }
     
     return false;

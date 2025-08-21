@@ -72,8 +72,8 @@ export function convertToDate(dateValue: unknown): Date | null {
   }
   
   // If it's a Firestore timestamp (has toDate method)
-  if (dateValue && typeof dateValue.toDate === 'function') {
-    return dateValue.toDate();
+  if (dateValue && typeof (dateValue as any).toDate === 'function') {
+    return (dateValue as any).toDate();
   }
   
   // If it's a timestamp number
@@ -82,8 +82,8 @@ export function convertToDate(dateValue: unknown): Date | null {
   }
   
   // If it's an object with seconds/nanoseconds (Firestore timestamp)
-  if (dateValue && typeof dateValue === 'object' && dateValue.seconds) {
-    return new Date(dateValue.seconds * 1000);
+  if (dateValue && typeof dateValue === 'object' && (dateValue as any).seconds) {
+    return new Date((dateValue as any).seconds * 1000);
   }
   
   console.error('Unable to convert to Date:', dateValue, 'Type:', typeof dateValue);
