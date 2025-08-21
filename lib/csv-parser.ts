@@ -229,7 +229,7 @@ export function parseSections(sections: { [key: string]: string[][] }): ParsedDa
       let dataRows: string[][] = [];
       
       for (const row of productPerformanceSection) {
-        if (row.length > 0) {
+        if (Array.isArray(row) && row.length > 0) {
           const firstCell = row[0]?.toLowerCase().trim();
           if (firstCell === 'asin' || firstCell === 'product' || firstCell === 'sku' || firstCell.includes('product id') || firstCell.includes('product name')) {
             headerRow = row.map(cell => cell.toLowerCase().trim());
@@ -242,9 +242,12 @@ export function parseSections(sections: { [key: string]: string[][] }): ParsedDa
       
       // If no explicit header found, use first row as header
       if (headerRow.length === 0 && productPerformanceSection.length > 0) {
-        headerRow = productPerformanceSection[0].map(cell => cell.toLowerCase().trim());
-        dataRows = productPerformanceSection.slice(1);
-        console.log('Using first row as header:', headerRow);
+        const firstRow = productPerformanceSection[0];
+        if (Array.isArray(firstRow)) {
+          headerRow = firstRow.map(cell => cell.toLowerCase().trim());
+          dataRows = productPerformanceSection.slice(1).filter(row => Array.isArray(row)) as string[][];
+          console.log('Using first row as header:', headerRow);
+        }
       }
     
     // Dynamic column mapping
