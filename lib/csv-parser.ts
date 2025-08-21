@@ -428,10 +428,7 @@ export function parseSections(sections: { [key: string]: string[][] }): ParsedDa
             'tacos change': 'tacosChange',
             'ctr this month': 'ctrThisMonth',
             'ctr': 'ctrThisMonth',
-            'ctr change': 'ctrChange',
-            'cvr this month': 'cvrThisMonth',
-            'cvr': 'cvrThisMonth',
-            'cvr change': 'cvrChange'
+            'ctr change': 'ctrChange'
           };
           
           const targetField = amazonMappings[metric];
@@ -464,8 +461,8 @@ function findSectionByKeywords(sections: { [key: string]: string[][] }, keywords
 }
 
 // Helper function to find all sections by keywords
-function findAllSectionsByKeywords(sections: { [key: string]: string[][] }, keywords: string[]): string[][] {
-  const matchingSections: string[][] = [];
+function findAllSectionsByKeywords(sections: { [key: string]: string[][] }, keywords: string[]): string[][][] {
+  const matchingSections: string[][][] = [];
   for (const [sectionName, sectionData] of Object.entries(sections)) {
     const lowerSectionName = sectionName.toLowerCase();
     if (keywords.some(keyword => lowerSectionName.includes(keyword))) {
