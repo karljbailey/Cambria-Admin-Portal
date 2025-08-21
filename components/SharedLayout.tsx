@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { handleLogout } from '@/lib/auth-utils';
 import MobileNavigation from '@/components/MobileNavigation';
