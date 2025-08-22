@@ -352,7 +352,7 @@ export default function Dashboard() {
       <EnhancedNavigation user={user} currentPage="dashboard" />
       
       {/* Permission Debugger (development only) */}
-      <PermissionDebugger userId={user?.id} />
+      {/* <PermissionDebugger userId={user?.id} /> */}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
