@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { auditHelpers } from '../lib/audit';
 import { handleLogout } from '../lib/auth-utils';
 import EnhancedNavigation from '../components/EnhancedNavigation';
+import { useClientPermissions } from '../lib/hooks/useClientPermissions';
+import PermissionDebugger from '../components/PermissionDebugger';
 
 interface Client {
   folderId: string;
@@ -41,9 +43,59 @@ export default function Dashboard() {
   });
   const [addClientLoading, setAddClientLoading] = useState(false);
 
+  // Client permissions hook - simplified since filtering is now at API level
+  const {
+    canWriteClient,
+    canAdminClient,
+    loading: permissionsLoading,
+    error: permissionsError,
+    isAdmin
+  } = useClientPermissions(user?.id);
+
+  const fetchClients = async () => {
+    try {
+      console.log('🔄 Fetching clients...');
+      setLoading(true);
+      
+      // Only fetch clients if user is authenticated
+      if (!user?.id) {
+        console.log('❌ No user ID available, cannot fetch clients');
+        setError('Authentication required');
+        return;
+      }
+      
+      // Pass user ID to get filtered clients from API
+      const url = `/api/clients?userId=${user.id}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (response.ok) {
+        const accessibleClients = data.clients as Client[];
+        console.log('✅ Setting accessible clients:', accessibleClients.length);
+        setClients(accessibleClients);
+        setFilteredClients(accessibleClients);
+      } else {
+        console.error('❌ Client fetch failed:', data.error);
+        setError(data.error || 'Failed to fetch clients');
+      }
+    } catch (err) {
+      console.error('❌ Client fetch error:', err);
+      setError('Failed to fetch clients');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Refetch clients when permissions are loaded
+  useEffect(() => {
+    if (user && !permissionsLoading) {
+      fetchClients();
+    }
+  }, [user, permissionsLoading]);
 
   const checkAuth = async () => {
     try {
@@ -52,7 +104,7 @@ export default function Dashboard() {
       
       if (data.authenticated) {
         setUser(data.user);
-        fetchClients();
+        // Don't fetch clients here - will be fetched when permissions are loaded
       } else {
         router.push('/login');
       }
@@ -80,29 +132,16 @@ export default function Dashboard() {
     }
   }, [searchTerm, clients]);
 
-  const fetchClients = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/clients');
-      const data = await response.json();
-      
-      if (response.ok) {
-        setClients(data.clients);
-        setFilteredClients(data.clients);
-      } else {
-        setError(data.error || 'Failed to fetch clients');
-      }
-    } catch (err) {
-      setError('Failed to fetch clients');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const toggleClientStatus = async (clientCode: string, currentStatus: boolean) => {
+    // Check if user has write permission for this client
+    if (!canWriteClient(clientCode)) {
+      alert('You do not have permission to modify this client.');
+      return;
+    }
+
     try {
       setUpdatingClient(clientCode);
-      const response = await fetch('/api/clients', {
+      const response = await fetch(`/api/clients?userId=${user?.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -186,6 +225,12 @@ export default function Dashboard() {
 
   // Add new client
   const handleAddClient = () => {
+    // Check if user has admin access or can create clients
+    if (!isAdmin) {
+      alert('You do not have permission to add new clients.');
+      return;
+    }
+    
     setShowAddClient(true);
     setAddClientForm({
       clientCode: '',
@@ -238,7 +283,7 @@ export default function Dashboard() {
 
     setAddClientLoading(true);
     try {
-      const response = await fetch('/api/clients', {
+      const response = await fetch(`/api/clients?userId=${user?.id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -305,6 +350,9 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Enhanced Navigation */}
       <EnhancedNavigation user={user} currentPage="dashboard" />
+      
+      {/* Permission Debugger (development only) */}
+      <PermissionDebugger userId={user?.id} />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
@@ -314,15 +362,17 @@ export default function Dashboard() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
                 <div className="flex items-center justify-between mb-4 sm:mb-0">
                   <h2 className="text-lg font-medium text-gray-900">Client List</h2>
-                  <button
-                    onClick={handleAddClient}
-                    className="ml-4 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 bg-white rounded-md hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-gray-500 focus:border-gray-500 flex items-center"
-                  >
-                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                    Add Client
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={handleAddClient}
+                      className="ml-4 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 bg-white rounded-md hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-gray-500 focus:border-gray-500 flex items-center"
+                    >
+                      <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Add Client
+                    </button>
+                  )}
                 </div>
                 
                 {/* Search Bar */}
@@ -359,9 +409,19 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {loading ? (
+              {loading || permissionsLoading ? (
                 <div className="flex justify-center items-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                </div>
+              ) : filteredClients.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">No client access</h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    You don&apos;t have access to any clients. Contact an administrator to request access.
+                  </p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -452,20 +512,22 @@ export default function Dashboard() {
                                         >
                                           View More
                                         </Link>
-                                        <button
-                                          onClick={() => handleMenuAction(() => toggleClientStatus(client.clientCode, client.active))}
-                                          disabled={updatingClient === client.clientCode}
-                                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-                                        >
-                                          {updatingClient === client.clientCode ? (
-                                            <span className="flex items-center">
-                                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                                              Updating...
-                                            </span>
-                                          ) : (
-                                            `${client.active ? 'Set as Inactive' : 'Set as Active'}`
-                                          )}
-                                        </button>
+                                        {canWriteClient(client.clientCode) && (
+                                          <button
+                                            onClick={() => handleMenuAction(() => toggleClientStatus(client.clientCode, client.active))}
+                                            disabled={updatingClient === client.clientCode}
+                                            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                                          >
+                                            {updatingClient === client.clientCode ? (
+                                              <span className="flex items-center">
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                                                Updating...
+                                              </span>
+                                            ) : (
+                                              `${client.active ? 'Set as Inactive' : 'Set as Active'}`
+                                            )}
+                                          </button>
+                                        )}
                                         <button
                                           onClick={() => handleMenuAction(() => {
                                             const url = getFolderUrl(client.folderId);

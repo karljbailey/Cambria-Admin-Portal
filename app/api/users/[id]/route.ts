@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { rbacService } from '@/lib/rbac';
 import { usersService } from '@/lib/collections';
 import { isFirebaseConfigured } from '@/lib/init';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ userId: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     if (!isFirebaseConfigured()) {
@@ -15,17 +14,17 @@ export async function GET(
       );
     }
 
-    const { userId } = await params;
-
-    if (!userId) {
+    const { id } = await params;
+    
+    if (!id) {
       return NextResponse.json(
         { success: false, error: 'User ID is required' },
         { status: 400 }
       );
     }
 
-    // Get user to determine their role
-    const user = await usersService.getById(userId);
+    const user = await usersService.getById(id);
+    
     if (!user) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
@@ -33,23 +32,23 @@ export async function GET(
       );
     }
 
-    // Get user permissions using RBAC service
-    const userPermissions = await rbacService.getUserPermissions(userId, user.role);
+    // Return user data without sensitive information
+    const safeUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+      lastLogin: user.lastLogin,
+      clientPermissions: user.clientPermissions || []
+    };
 
     return NextResponse.json({
       success: true,
-      permissions: userPermissions,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        status: user.status
-      }
+      user: safeUser
     });
-
   } catch (error) {
-    console.error('Error fetching user permissions:', error);
+    console.error('Error fetching user:', error);
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }
@@ -59,7 +58,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ userId: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     if (!isFirebaseConfigured()) {
@@ -69,35 +68,25 @@ export async function PUT(
       );
     }
 
-    const { userId } = await params;
+    const { id } = await params;
     const body = await request.json();
-
-    if (!userId) {
+    
+    if (!id) {
       return NextResponse.json(
         { success: false, error: 'User ID is required' },
         { status: 400 }
       );
     }
 
-    // Validate request body
-    const { permissions } = body;
-    if (!permissions || typeof permissions !== 'object') {
-      return NextResponse.json(
-        { success: false, error: 'Permissions object is required' },
-        { status: 400 }
-      );
-    }
-
-    // Clear user permissions cache to force refresh
-    rbacService.clearUserCache(userId);
+    // Update user
+    await usersService.update(id, body);
 
     return NextResponse.json({
       success: true,
-      message: 'User permissions cache cleared successfully'
+      message: 'User updated successfully'
     });
-
   } catch (error) {
-    console.error('Error updating user permissions cache:', error);
+    console.error('Error updating user:', error);
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
       { status: 500 }

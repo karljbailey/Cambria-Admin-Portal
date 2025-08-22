@@ -64,16 +64,14 @@ export interface ParsedData {
   };
 }
 
-// Helper function to safely parse numeric values
+// Helper function to safely parse values - store raw values
 function safeParseNumber(value: string): number | string {
   if (!value || value.trim() === '' || value.trim().toLowerCase() === 'n/a') {
     return 'N/A';
   }
   
-  const cleanedValue = value.replace(/[$,%]/g, '');
-  const parsed = parseFloat(cleanedValue);
-  
-  return isNaN(parsed) ? 'N/A' : parsed;
+  // Return the raw value as a string, don't parse or modify it
+  return value.trim();
 }
 
 // Helper function to create empty parsed data structure

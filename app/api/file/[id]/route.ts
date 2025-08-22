@@ -2,6 +2,42 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import * as XLSX from 'xlsx';
 import { ParsedData, parseCSV, createEmptyParsedData } from '../../../../lib/csv-parser';
+import { usersService } from '@/lib/collections';
+import { isFirebaseConfigured } from '@/lib/init';
+
+// Helper function to check if user has access to a client
+async function checkClientAccess(userId: string, clientCode: string): Promise<boolean> {
+  if (!isFirebaseConfigured()) {
+    console.log('Firebase not configured, denying access');
+    return false;
+  }
+
+  try {
+    const user = await usersService.getById(userId);
+    if (!user) {
+      console.log(`User ${userId} not found, denying access`);
+      return false;
+    }
+
+    // Admin users have access to all clients
+    if (user.role === 'admin') {
+      console.log(`User ${userId} is admin, granting access to client ${clientCode}`);
+      return true;
+    }
+
+    // Check if user has permission for this specific client
+    const userPermissions = user.clientPermissions || [];
+    const hasAccess = userPermissions.some(permission => 
+      permission.clientCode.toUpperCase() === clientCode.toUpperCase()
+    );
+
+    console.log(`User ${userId} access check for client ${clientCode}: ${hasAccess}`);
+    return hasAccess;
+  } catch (error) {
+    console.error('Error checking client access:', error);
+    return false;
+  }
+}
 
 // Helper function to detect if content is actually Excel data
 function isExcelContent(content: string | Buffer): boolean {
@@ -366,16 +402,9 @@ function parseProfitLossData(sheetData: unknown[][], result: ParsedData): void {
       }
 
       const metric = String(row[0] || '').toLowerCase().trim();
-      const rawValue = String(row[1] || '0').replace(/[$,%]/g, '').trim();
+      const rawValue = String(row[1] || '0').trim();
       
-      // Enhanced number parsing with validation
-      const value = parseFloat(rawValue);
-      if (isNaN(value)) {
-        console.log(`Skipping metric "${metric}" - invalid number: "${rawValue}"`);
-        continue;
-      }
-      
-      console.log(`Processing metric: "${metric}" = ${value}`);
+      console.log(`Processing metric: "${metric}" = "${rawValue}"`);
       
       // More comprehensive metric matching
       switch (metric) {
@@ -384,67 +413,67 @@ function parseProfitLossData(sheetData: unknown[][], result: ParsedData): void {
         case 'gross sales':
         case 'revenue':
         case 'total revenue':
-          result.profitLoss.sales = Math.max(0, value); // Sales should be positive
+          result.profitLoss.sales = rawValue; // Store raw value
           break;
         case 'cost of goods': 
         case 'cogs':
         case 'cost of goods sold':
         case 'cost of sales':
-          result.profitLoss.costOfGoods = -Math.abs(value); // Ensure negative
+          result.profitLoss.costOfGoods = rawValue; // Store raw value
           break;
         case 'taxes': 
         case 'tax':
         case 'income tax':
-          result.profitLoss.taxes = -Math.abs(value); // Ensure negative
+          result.profitLoss.taxes = rawValue; // Store raw value
           break;
         case 'fba fees': 
         case 'fba':
         case 'fulfillment fees':
         case 'fulfillment by amazon fees':
-          result.profitLoss.fbaFees = -Math.abs(value); // Ensure negative
+          result.profitLoss.fbaFees = rawValue; // Store raw value
           break;
         case 'referral fees': 
         case 'referral':
         case 'amazon referral fees':
-          result.profitLoss.referralFees = -Math.abs(value); // Ensure negative
+          result.profitLoss.referralFees = rawValue; // Store raw value
           break;
         case 'storage fees': 
         case 'storage':
         case 'warehouse fees':
-          result.profitLoss.storageFees = -Math.abs(value); // Ensure negative
+          result.profitLoss.storageFees = rawValue; // Store raw value
           break;
         case 'ad expenses': 
         case 'advertising':
         case 'ad spend':
         case 'advertising expenses':
         case 'marketing':
-          result.profitLoss.adExpenses = -Math.abs(value); // Ensure negative
+          result.profitLoss.adExpenses = rawValue; // Store raw value
           break;
         case 'refunds': 
         case 'refund':
         case 'returns':
-          result.profitLoss.refunds = -Math.abs(value); // Ensure negative
+          result.profitLoss.refunds = rawValue; // Store raw value
           break;
         case 'expenses': 
         case 'total expenses':
         case 'operating expenses':
-          result.profitLoss.expenses = -Math.abs(value); // Ensure negative
+          result.profitLoss.expenses = rawValue; // Store raw value
           break;
         case 'net profit': 
         case 'profit':
         case 'net income':
         case 'profit after tax':
-          result.profitLoss.netProfit = value; // Can be positive or negative
+          result.profitLoss.netProfit = rawValue; // Store raw value
           break;
         case 'margin': 
         case 'profit margin':
         case 'net margin':
-          result.profitLoss.margin = value; // Percentage - can be positive or negative
+          result.profitLoss.margin = rawValue; // Store raw value
           break;
         case 'roi': 
         case 'return on investment':
         case 'return on investment %':
-          result.profitLoss.roi = value; // Percentage - can be positive or negative
+          result.profitLoss.roi = rawValue; // Store raw value
           break;
         default:
           // Log unrecognized metrics for debugging
@@ -507,25 +536,25 @@ function parseProductPerformanceData(sheetData: unknown[][], result: ParsedData)
     const product = {
       asin: String(row[asinIndex] || ''),
       title: String(row[titleIndex] || ''),
-      salesThisMonth: parseFloat(String(row[salesIndex] || '0').replace(/[$,]/g, '')),
+      salesThisMonth: String(row[salesIndex] || '0'),
       salesChange: String(row[salesChangeIndex] || ''),
-      netProfitThisMonth: parseFloat(String(row[profitIndex] || '0').replace(/[$,]/g, '')),
+      netProfitThisMonth: String(row[profitIndex] || '0'),
       netProfitChange: String(row[profitChangeIndex] || ''),
-      marginThisMonth: parseFloat(String(row[marginIndex] || '0')),
+      marginThisMonth: String(row[marginIndex] || '0'),
       marginChange: String(row[marginChangeIndex] || ''),
-      unitsThisMonth: parseInt(String(row[unitsIndex] || '0')),
+      unitsThisMonth: String(row[unitsIndex] || '0'),
       unitsChange: String(row[unitsChangeIndex] || ''),
-      refundRateThisMonth: parseFloat(String(row[refundIndex] || '0')),
+      refundRateThisMonth: String(row[refundIndex] || '0'),
       refundRateChange: String(row[refundChangeIndex] || ''),
-      adSpendThisMonth: parseFloat(String(row[adSpendIndex] || '0').replace(/[$,]/g, '')),
+      adSpendThisMonth: String(row[adSpendIndex] || '0'),
       adSpendChange: String(row[adSpendChangeIndex] || ''),
-      acosThisMonth: parseFloat(String(row[acosIndex] || '0')),
+      acosThisMonth: String(row[acosIndex] || '0'),
       acosChange: String(row[acosChangeIndex] || ''),
-      tacosThisMonth: parseFloat(String(row[tacosIndex] || '0')),
+      tacosThisMonth: String(row[tacosIndex] || '0'),
       tacosChange: String(row[tacosChangeIndex] || ''),
-      ctrThisMonth: parseFloat(String(row[ctrIndex] || '0')),
+      ctrThisMonth: String(row[ctrIndex] || '0'),
       ctrChange: String(row[ctrChangeIndex] || ''),
-      cvrThisMonth: parseFloat(String(row[cvrIndex] || '0')),
+      cvrThisMonth: String(row[cvrIndex] || '0'),
       cvrChange: String(row[cvrChangeIndex] || '')
     };
     
@@ -564,32 +593,32 @@ function parseAmazonPerformanceData(sheetData: unknown[][], result: ParsedData) 
   for (const row of sheetData) {
     if (row.length >= 2) {
       const metric = String(row[0] || '').toLowerCase();
-      const value = parseFloat(String(row[1] || '0').replace(/[$,%]/g, ''));
+      const rawValue = String(row[1] || '0');
       const change = String(row[2] || '');
       
       if (metric.includes('sales') && metric.includes('month')) {
-        result.amazonPerformance.salesThisMonth = value;
+        result.amazonPerformance.salesThisMonth = rawValue;
         result.amazonPerformance.salesChange = change;
       } else if (metric.includes('profit') && metric.includes('month')) {
-        result.amazonPerformance.netProfitThisMonth = value;
+        result.amazonPerformance.netProfitThisMonth = rawValue;
         result.amazonPerformance.netProfitChange = change;
       } else if (metric.includes('margin') && metric.includes('month')) {
-        result.amazonPerformance.marginThisMonth = value;
+        result.amazonPerformance.marginThisMonth = rawValue;
         result.amazonPerformance.marginChange = change;
       } else if (metric.includes('unit') && metric.includes('month')) {
-        result.amazonPerformance.unitsThisMonth = value;
+        result.amazonPerformance.unitsThisMonth = rawValue;
         result.amazonPerformance.unitsChange = change;
       } else if (metric.includes('refund') && metric.includes('month')) {
-        result.amazonPerformance.refundRateThisMonth = value;
+        result.amazonPerformance.refundRateThisMonth = rawValue;
         result.amazonPerformance.refundRateChange = change;
       } else if (metric.includes('acos') && metric.includes('month')) {
-        result.amazonPerformance.acosThisMonth = value;
+        result.amazonPerformance.acosThisMonth = rawValue;
         result.amazonPerformance.acosChange = change;
       } else if (metric.includes('tacos') && metric.includes('month')) {
-        result.amazonPerformance.tacosThisMonth = value;
+        result.amazonPerformance.tacosThisMonth = rawValue;
         result.amazonPerformance.tacosChange = change;
       } else if (metric.includes('ctr') && metric.includes('month')) {
-        result.amazonPerformance.ctrThisMonth = value;
+        result.amazonPerformance.ctrThisMonth = rawValue;
         result.amazonPerformance.ctrChange = change;
       }
     }
@@ -642,6 +671,27 @@ export async function GET(
       return NextResponse.json(
         { error: 'File ID is required' },
         { status: 400 }
+      );
+    }
+
+    // Check user permissions
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const clientCode = searchParams.get('clientCode');
+
+    if (!userId || !clientCode) {
+      return NextResponse.json(
+        { error: 'User ID and client code are required' },
+        { status: 400 }
+      );
+    }
+
+    // Check if user has access to this client
+    const hasAccess = await checkClientAccess(userId, clientCode);
+    if (!hasAccess) {
+      return NextResponse.json(
+        { error: 'Access denied. You do not have permission to access this client.' },
+        { status: 403 }
       );
     }
 

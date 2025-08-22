@@ -22,3 +22,4 @@ export interface PermissionCheckResult {
   reason?: string;
   level: PermissionLevel;
 }
+

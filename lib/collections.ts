@@ -19,6 +19,15 @@ export interface AuditLog {
   updated_at?: Date;
 }
 
+export interface ClientPermission {
+  clientCode: string;
+  clientName: string;
+  permissionType: 'read' | 'write' | 'admin';
+  grantedBy: string;
+  grantedAt: Date;
+  expiresAt?: Date;
+}
+
 export interface User {
   id?: string;
   email: string;
@@ -28,6 +37,7 @@ export interface User {
   role: 'admin' | 'basic';
   status: 'active' | 'inactive';
   lastLogin?: string | null;
+  clientPermissions?: ClientPermission[];
   created_at?: Date;
   updated_at?: Date;
 }
@@ -116,9 +126,19 @@ export const usersService = {
     return await getDocumentById(COLLECTIONS.USERS, userId) as unknown as User | null;
   },
 
-  // Get user by email
+  // Get user by email (case-insensitive)
   async getByEmail(email: string): Promise<User | null> {
-    const users = await queryDocuments(COLLECTIONS.USERS, 'email', '==', email) as unknown as User[];
+    // First try exact match
+    let users = await queryDocuments(COLLECTIONS.USERS, 'email', '==', email) as unknown as User[];
+    
+    // If no exact match, try case-insensitive search
+    if (users.length === 0) {
+      const allUsers = await getAllDocuments(COLLECTIONS.USERS) as unknown as User[];
+      users = allUsers.filter(user => 
+        user.email.toLowerCase() === email.toLowerCase()
+      );
+    }
+    
     return users.length > 0 ? users[0] : null;
   },
 
@@ -143,6 +163,86 @@ export const usersService = {
   // Update user status
   async updateStatus(userId: string, status: 'active' | 'inactive'): Promise<void> {
     await this.update(userId, { status });
+  },
+
+  // Add client permission to user
+  async addClientPermission(userId: string, clientPermission: ClientPermission): Promise<void> {
+    const user = await this.getById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const updatedPermissions = [
+      ...(user.clientPermissions || []),
+      clientPermission
+    ];
+
+    await this.update(userId, { clientPermissions: updatedPermissions });
+  },
+
+  // Remove client permission from user
+  async removeClientPermission(userId: string, clientCode: string): Promise<void> {
+    const user = await this.getById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const updatedPermissions = (user.clientPermissions || []).filter(
+      permission => permission.clientCode !== clientCode
+    );
+
+    await this.update(userId, { clientPermissions: updatedPermissions });
+  },
+
+  // Update client permission for user
+  async updateClientPermission(userId: string, clientCode: string, permissionType: 'read' | 'write' | 'admin'): Promise<void> {
+    const user = await this.getById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const updatedPermissions = (user.clientPermissions || []).map(permission => 
+      permission.clientCode === clientCode 
+        ? { ...permission, permissionType, updated_at: new Date() }
+        : permission
+    );
+
+    await this.update(userId, { clientPermissions: updatedPermissions });
+  },
+
+  // Get user's client permissions
+  async getClientPermissions(userId: string): Promise<ClientPermission[]> {
+    const user = await this.getById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+    return user.clientPermissions || [];
+  },
+
+  // Check if user has permission for specific client
+  async hasClientPermission(userId: string, clientCode: string, requiredPermission: 'read' | 'write' | 'admin'): Promise<boolean> {
+    const user = await this.getById(userId);
+    if (!user) {
+      return false;
+    }
+
+    // Admin users have all permissions
+    if (user.role === 'admin') {
+      return true;
+    }
+
+    // Exact matching
+    const permission = (user.clientPermissions || []).find(p => p.clientCode === clientCode);
+    if (!permission) {
+      return false;
+    }
+
+    // Check permission hierarchy
+    const permissionLevels = { read: 1, write: 2, admin: 3 };
+    const userLevel = permissionLevels[permission.permissionType];
+    const requiredLevel = permissionLevels[requiredPermission];
+
+    return userLevel >= requiredLevel;
   }
 };
 
@@ -216,7 +316,8 @@ export async function initializeCollectionsWithSampleData() {
         passwordHash,
         passwordSalt,
         role: 'admin',
-        status: 'active'
+        status: 'active',
+        clientPermissions: []
       });
 
       console.log('✅ Sample users added with default password: integrate8000');

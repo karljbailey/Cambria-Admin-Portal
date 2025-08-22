@@ -28,13 +28,10 @@
 
 | Feature | Description | Status | Access Level |
 |---------|-------------|--------|--------------|
-| **RBAC System** | Role-Based Access Control implementation | ✅ Active | Admin Only |
 | **Permission Assignment** | Assign read/write/admin permissions | ✅ Active | Admin Only |
 | **Resource-Level Permissions** | Permissions for specific resources (users, clients, files) | ✅ Active | Admin Only |
 | **Permission Hierarchy** | Admin > Write > Read permission levels | ✅ Active | Admin Only |
 | **Permission Auditing** | Track permission changes and assignments | ✅ Active | Admin Only |
-| **Protected Navigation** | Hide menu items based on user permissions | ✅ Active | All Users |
-| **Client-Side Permission Checks** | Real-time permission validation | ✅ Active | All Users |
 
 ## 🏢 Client Management
 

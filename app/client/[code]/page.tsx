@@ -6,6 +6,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { auditHelpers } from '@/lib/audit';
 // import { handleLogout } from '@/lib/auth-utils';
 import EnhancedNavigation from '@/components/EnhancedNavigation';
+import { useClientPermissions } from '@/lib/hooks/useClientPermissions';
+
 
 interface Client {
   folderId: string;
@@ -130,6 +132,15 @@ export default function ClientPage() {
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [user, setUser] = useState<{ id: string; email: string; name?: string; role?: string } | null>(null);
 
+  // Client permissions hook - simplified since filtering is now at API level
+  const {
+    canWriteClient,
+    canAdminClient,
+    loading: permissionsLoading,
+    error: permissionsError,
+    isAdmin
+  } = useClientPermissions(user?.id);
+
   const checkAuth = useCallback(async () => {
     try {
       const response = await fetch('/api/auth/session');
@@ -158,11 +169,60 @@ export default function ClientPage() {
     }
   }, [checkAuth]);
 
+  const fetchClient = useCallback(async () => {
+    console.log('🔍 Starting fetchClient:', { clientCode, user: user?.id });
+    
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Pass user ID to get filtered clients from API
+      const url = user?.id ? `/api/clients?userId=${user.id}` : '/api/clients';
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (response.ok) {
+        const foundClient = data.clients.find((c: Client) => c.clientCode === clientCode);
+        console.log('🔍 Client search result:', { 
+          foundClient: !!foundClient, 
+          clientCode, 
+          availableClients: data.clients.map((c: Client) => c.clientCode) 
+        });
+        
+        if (foundClient) {
+          console.log('✅ Access granted for client:', clientCode);
+          setClient(foundClient);
+          // Add audit log for viewing client
+          auditHelpers.clientViewed(clientCode, foundClient.fullName);
+        } else {
+          console.log('❌ Client not found or access denied:', clientCode);
+          setError('Client not found or you do not have permission to access this client.');
+        }
+      } else {
+        console.log('❌ Client fetch failed:', data.error);
+        setError(data.error || 'Failed to fetch client');
+      }
+    } catch (err) {
+      console.log('❌ Client fetch error:', err);
+      setError('Failed to fetch client');
+    } finally {
+      setLoading(false);
+    }
+  }, [clientCode, user?.id]);
+
   useEffect(() => {
-    if (clientCode && user) {
+    console.log('🔍 Client fetch effect:', { 
+      clientCode, 
+      hasUser: !!user, 
+      permissionsLoading,
+      isAdmin,
+      shouldFetch: clientCode && user && !permissionsLoading
+    });
+    
+    if (clientCode && user && !permissionsLoading) {
       fetchClient();
     }
-  }, [clientCode, user]);
+  }, [clientCode, user, permissionsLoading, fetchClient]);
 
   useEffect(() => {
     if (client?.folderId) {
@@ -196,31 +256,6 @@ export default function ClientPage() {
       setSelectedMonth(availableMonths[0]);
     }
   }, [monthlyReports, availableMonths, selectedMonth]);
-
-  const fetchClient = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/clients');
-      const data = await response.json();
-      
-      if (response.ok) {
-        const foundClient = data.clients.find((c: Client) => c.clientCode === clientCode);
-        if (foundClient) {
-          setClient(foundClient);
-          // Add audit log for viewing client
-          auditHelpers.clientViewed(clientCode, foundClient.fullName);
-        } else {
-          setError('Client not found');
-        }
-      } else {
-        setError(data.error || 'Failed to fetch client');
-      }
-    } catch (err) {
-      setError('Failed to fetch client');
-    } finally {
-      setLoading(false);
-    }
-  }, [clientCode]);
 
   const fetchFolderData = async () => {
     if (!client?.folderId) return;
@@ -274,7 +309,7 @@ export default function ClientPage() {
           );
           
           if (monthlyReportFile) {
-            const reportData = await fetch(`/api/file/${monthlyReportFile.id}`);
+            const reportData = await fetch(`/api/file/${monthlyReportFile.id}?userId=${user?.id}&clientCode=${clientCode}`);
             const reportContent = await reportData.json();
             
             if (reportData.ok) {
@@ -332,10 +367,15 @@ export default function ClientPage() {
 
   const formatCurrency = (value: number | string) => {
     if (typeof value === 'string') {
-      return value === 'N/A' ? 'N/A' : new Intl.NumberFormat('en-US', {
+      if (value === 'N/A') return 'N/A';
+      // If the value already contains a $ symbol, return it as-is
+      if (value.includes('$')) return value;
+      // Otherwise, try to parse and format it
+      const parsed = parseFloat(value);
+      return isNaN(parsed) ? value : new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD'
-      }).format(parseFloat(value));
+      }).format(parsed);
     }
     if (typeof value === 'number' && !isNaN(value)) {
       return new Intl.NumberFormat('en-US', {
@@ -346,9 +386,29 @@ export default function ClientPage() {
     return 'N/A';
   };
 
+  const formatPercentageMultiplied = (value: number | string) => {
+    if (typeof value === 'string') {
+      if (value === 'N/A') return 'N/A';
+      // If the value already contains a % symbol, return it as-is
+      if (value.includes('%')) return value;
+      // Otherwise, try to parse and multiply by 100
+      const parsed = parseFloat(value);
+      return isNaN(parsed) ? value : `${(parsed * 100).toFixed(2)}%`;
+    }
+    if (typeof value === 'number' && !isNaN(value)) {
+      return `${(value * 100).toFixed(2)}%`;
+    }
+    return 'N/A';
+  };
+
   const formatPercentage = (value: number | string) => {
     if (typeof value === 'string') {
-      return value === 'N/A' ? 'N/A' : `${parseFloat(value).toFixed(2)}%`;
+      if (value === 'N/A') return 'N/A';
+      // If the value already contains a % symbol, return it as-is
+      if (value.includes('%')) return value;
+      // Otherwise, try to parse and format it
+      const parsed = parseFloat(value);
+      return isNaN(parsed) ? value : `${parsed.toFixed(2)}%`;
     }
     if (typeof value === 'number' && !isNaN(value)) {
       return `${value.toFixed(2)}%`;
@@ -408,6 +468,12 @@ export default function ClientPage() {
   const handleEdit = () => {
     if (!client) return;
     
+    // Check if user has write permission for this client
+    if (!canWriteClient(clientCode)) {
+      alert('You do not have permission to edit this client.');
+      return;
+    }
+    
     setEditForm({
       clientCode: client.clientCode,
       clientName: client.clientName,
@@ -439,6 +505,12 @@ export default function ClientPage() {
   const handleSaveEdit = async () => {
     if (!client) return;
 
+    // Check if user has write permission for this client
+    if (!canWriteClient(clientCode)) {
+      alert('You do not have permission to edit this client.');
+      return;
+    }
+
     // Validate folder URL
     if (!isValidGoogleDriveUrl(editForm.folderUrl)) {
       alert('Please enter a valid Google Drive URL');
@@ -453,7 +525,7 @@ export default function ClientPage() {
 
     setEditLoading(true);
     try {
-      const response = await fetch('/api/clients', {
+      const response = await fetch(`/api/clients?userId=${user?.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -590,6 +662,12 @@ export default function ClientPage() {
 
   // Upload files to Google Drive
   const uploadFiles = async (files: File[]) => {
+    // Check if user has write permission for this client
+    if (!canWriteClient(clientCode)) {
+      alert('You do not have permission to upload files to this client.');
+      return;
+    }
+
     // Use selected folder ID if we're viewing month folder contents, otherwise use main client folder
     const targetFolderId = selectedFolder && /^\d{4}-\d{2}$/.test(selectedFolder.name) 
       ? selectedFolder.id 
@@ -646,10 +724,29 @@ export default function ClientPage() {
     }
   };
 
-  if (loading) {
+  if (loading || permissionsLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div data-testid="loading-spinner" className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-gray-50">
+        <EnhancedNavigation user={user} currentPage="dashboard" />
+        <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+          <div className="px-4 py-6 sm:px-0">
+            <div className="bg-white shadow rounded-lg p-6">
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div data-testid="loading-spinner" className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600">
+                    {permissionsLoading ? 'Loading permissions...' : 'Loading client data...'}
+                  </p>
+                  {permissionsError && (
+                    <p className="text-red-600 text-sm mt-2">
+                      Permission error: {permissionsError}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -659,18 +756,38 @@ export default function ClientPage() {
   if (error || !client) {
     return (
       <div className="min-h-screen bg-gray-50">
+        <EnhancedNavigation user={user} currentPage="dashboard" />
         <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
           <div className="px-4 py-6 sm:px-0">
             <div className="bg-white shadow rounded-lg p-6">
               <div className="text-center">
-                <h2 data-testid="error-title" className="text-xl font-semibold text-gray-900 mb-4">Client Not Found</h2>
-                <p data-testid="error-message" className="text-gray-600 mb-4">{error || 'The requested client could not be found.'}</p>
-                <Link
-                  href="/"
-                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                >
-                  Back to Dashboard
-                </Link>
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <h2 data-testid="error-title" className="text-xl font-semibold text-gray-900 mb-4">
+                  {error?.includes('permission') ? 'Access Denied' : 'Client Not Found'}
+                </h2>
+                <p data-testid="error-message" className="text-gray-600 mb-6 max-w-md mx-auto">
+                  {error || 'The requested client could not be found.'}
+                </p>
+                <div className="space-x-4">
+                  <Link
+                    href="/"
+                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  >
+                    Back to Dashboard
+                  </Link>
+                  {error?.includes('permission') && (
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+                    >
+                      Try Again
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -687,6 +804,8 @@ export default function ClientPage() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
+          
+          
           <div className="bg-white shadow rounded-lg">
             <div className="px-4 py-5 sm:p-6">
               {/* Breadcrumbs */}
@@ -726,15 +845,17 @@ export default function ClientPage() {
                   }`}>
                     {client.active ? 'Active' : 'Inactive'}
                   </span>
-                  <button
-                    onClick={handleEdit}
-                    className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    Edit
-                  </button>
+                  {canWriteClient(clientCode) && (
+                    <button
+                      onClick={handleEdit}
+                      className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Edit
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1034,7 +1155,7 @@ export default function ClientPage() {
                           <div>
                             <p className="text-sm font-medium text-gray-600">Profit Margin</p>
                             <p className="text-3xl font-bold text-gray-900 mt-1">
-                              {formatPercentage(selectedReport.profitLoss.margin)}
+                              {formatPercentageMultiplied(selectedReport.profitLoss.margin)}
                             </p>
                           </div>
                           <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
@@ -1050,7 +1171,7 @@ export default function ClientPage() {
                           <div>
                             <p className="text-sm font-medium text-gray-600">ROI</p>
                             <p className="text-3xl font-bold text-gray-900 mt-1">
-                              {formatPercentage(selectedReport.profitLoss.roi)}
+                              {formatPercentageMultiplied(selectedReport.profitLoss.roi)}
                             </p>
                           </div>
                           <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
@@ -1120,7 +1241,7 @@ export default function ClientPage() {
                             </div>
                             <p className="text-sm font-medium text-gray-600 mb-1">ACoS</p>
                             <p className="text-xl font-bold text-gray-900">
-                              {formatPercentage(selectedReport.amazonPerformance.acosThisMonth)}
+                              {selectedReport.amazonPerformance.acosThisMonth}
                             </p>
                             <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-2 ${
                               selectedReport.amazonPerformance.acosChange.includes('🔽') 
@@ -1213,7 +1334,7 @@ export default function ClientPage() {
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <p className={`text-sm font-medium ${isNumeric(product.marginThisMonth) ? (getNumericValue(product.marginThisMonth) >= 20 ? 'text-green-700' : getNumericValue(product.marginThisMonth) >= 10 ? 'text-blue-700' : 'text-red-700') : 'text-gray-700'}`}>
-                                    {formatPercentage(product.marginThisMonth)}
+                                    {product.marginThisMonth}
                                   </p>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -1223,7 +1344,7 @@ export default function ClientPage() {
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <p className={`text-sm font-medium ${isNumeric(product.acosThisMonth) ? (getNumericValue(product.acosThisMonth) <= 15 ? 'text-green-700' : getNumericValue(product.acosThisMonth) <= 25 ? 'text-blue-700' : 'text-red-700') : 'text-gray-700'}`}>
-                                    {formatPercentage(product.acosThisMonth)}
+                                    {product.acosThisMonth}
                                   </p>
                                 </td>
                               </tr>
@@ -1512,8 +1633,8 @@ export default function ClientPage() {
                     </div>
                   </div>
                   
-                  {/* File Upload Area - Only show in month folder contents */}
-                  {/^\d{4}-\d{2}$/.test(selectedFolder.name) && (
+                  {/* File Upload Area - Only show in month folder contents and if user has write permission */}
+                  {/^\d{4}-\d{2}$/.test(selectedFolder.name) && canWriteClient(clientCode) && (
                     <div 
                       className={`mb-6 p-6 border-2 border-dashed rounded-lg text-center transition-colors ${
                         isDragOver 

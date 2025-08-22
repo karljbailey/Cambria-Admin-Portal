@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import { usersService } from '@/lib/collections';
+import { isFirebaseConfigured } from '@/lib/init';
 
 interface Client {
   folderId: string;
@@ -11,7 +13,7 @@ interface Client {
   active: boolean;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     // Validate environment configuration
     const serviceAccountEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -139,7 +141,66 @@ export async function GET() {
     }));
 
     console.log(`Successfully fetched ${clients.length} clients from spreadsheet`);
-    return NextResponse.json({ clients });
+
+    // Check if user permissions should be applied
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    const forPermissionManagement = searchParams.get('forPermissionManagement') === 'true';
+    
+    if (userId && isFirebaseConfigured()) {
+      try {
+        // Get user and their permissions
+        const user = await usersService.getById(userId);
+        if (!user) {
+          console.log(`User ${userId} not found, denying access`);
+          return NextResponse.json(
+            { error: 'User not found' },
+            { status: 403 }
+          );
+        }
+
+        // If user is admin, return all clients
+        if (user.role === 'admin') {
+          console.log(`User ${userId} is admin, returning all ${clients.length} clients`);
+          return NextResponse.json({ clients });
+        }
+
+        // If this is for permission management, return all clients (admin function)
+        if (forPermissionManagement) {
+          console.log(`Permission management request for user ${userId}, returning all ${clients.length} clients`);
+          return NextResponse.json({ clients });
+        }
+
+        // Get user's client permissions
+        const userPermissions = user.clientPermissions || [];
+        const accessibleClientCodes = userPermissions.map(p => p.clientCode);
+        
+        console.log(`User ${userId} has access to ${accessibleClientCodes.length} clients:`, accessibleClientCodes);
+
+        // Filter clients based on permissions
+        const filteredClients = clients.filter(client => 
+          accessibleClientCodes.some(code => 
+            code.toUpperCase() === client.clientCode.toUpperCase()
+          )
+        );
+
+        console.log(`Filtered clients for user ${userId}: ${filteredClients.length} out of ${clients.length}`);
+        return NextResponse.json({ clients: filteredClients });
+      } catch (error) {
+        console.error('Error applying user permissions:', error);
+        // If permission check fails, deny access for security
+        return NextResponse.json(
+          { error: 'Permission check failed' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // No user ID provided or Firebase not configured, deny access
+    return NextResponse.json(
+      { error: 'Authentication required' },
+      { status: 401 }
+    );
   } catch (error) {
     // Enhanced error logging with more context
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -160,6 +221,48 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
+    // Check user permissions first
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!isFirebaseConfigured()) {
+      return NextResponse.json(
+        { error: 'Authentication system not configured' },
+        { status: 500 }
+      );
+    }
+
+    try {
+      const user = await usersService.getById(userId);
+      if (!user) {
+        return NextResponse.json(
+          { error: 'User not found' },
+          { status: 403 }
+        );
+      }
+
+      // Only admin users can modify clients
+      if (user.role !== 'admin') {
+        return NextResponse.json(
+          { error: 'Admin access required to modify clients' },
+          { status: 403 }
+        );
+      }
+    } catch (error) {
+      console.error('Error checking user permissions:', error);
+      return NextResponse.json(
+        { error: 'Permission check failed' },
+        { status: 403 }
+      );
+    }
+
     // Parse and validate request body
     let body;
     try {
@@ -395,6 +498,48 @@ export async function PATCH(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    // Check user permissions first
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!isFirebaseConfigured()) {
+      return NextResponse.json(
+        { error: 'Authentication system not configured' },
+        { status: 500 }
+      );
+    }
+
+    try {
+      const user = await usersService.getById(userId);
+      if (!user) {
+        return NextResponse.json(
+          { error: 'User not found' },
+          { status: 403 }
+        );
+      }
+
+      // Only admin users can modify clients
+      if (user.role !== 'admin') {
+        return NextResponse.json(
+          { error: 'Admin access required to modify clients' },
+          { status: 403 }
+        );
+      }
+    } catch (error) {
+      console.error('Error checking user permissions:', error);
+      return NextResponse.json(
+        { error: 'Permission check failed' },
+        { status: 403 }
+      );
+    }
+
     // Parse and validate request body
     let body;
     try {
@@ -649,6 +794,48 @@ export async function PUT(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Check user permissions first
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId');
+    
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!isFirebaseConfigured()) {
+      return NextResponse.json(
+        { error: 'Authentication system not configured' },
+        { status: 500 }
+      );
+    }
+
+    try {
+      const user = await usersService.getById(userId);
+      if (!user) {
+        return NextResponse.json(
+          { error: 'User not found' },
+          { status: 403 }
+        );
+      }
+
+      // Only admin users can create clients
+      if (user.role !== 'admin') {
+        return NextResponse.json(
+          { error: 'Admin access required to create clients' },
+          { status: 403 }
+        );
+      }
+    } catch (error) {
+      console.error('Error checking user permissions:', error);
+      return NextResponse.json(
+        { error: 'Permission check failed' },
+        { status: 403 }
+      );
+    }
+
     // Parse and validate request body
     let body;
     try {
