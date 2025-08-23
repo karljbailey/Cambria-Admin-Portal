@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { initializeApp, isFirebaseConfigured } from '@/lib/init';
 import { auditLogsService, AuditLog } from '@/lib/collections';
 import { addAuditLog } from '@/lib/audit-utils';
+import { getRequestMetadata } from '@/lib/ip-utils';
 
 // Initialize Firebase if configured
 if (isFirebaseConfigured()) {
@@ -21,8 +22,8 @@ const mockAuditLogs: AuditLog[] = [
     resourceId: 'CAM',
     resourceName: 'Cambria AI Project',
     details: 'Created new client with folder ID: 1t0qhM3bxcgxzp74ZoaDamZc43hl8WCqn',
-    ipAddress: '192.168.1.100',
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    ipAddress: '203.0.113.45',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   },
   {
     id: '2',
@@ -35,8 +36,8 @@ const mockAuditLogs: AuditLog[] = [
     resourceId: 'CAM',
     resourceName: 'Cambria AI Project',
     details: 'Viewed client dashboard and monthly reports',
-    ipAddress: '192.168.1.101',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ipAddress: '198.51.100.23',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   },
   {
     id: '3',
@@ -49,8 +50,8 @@ const mockAuditLogs: AuditLog[] = [
     resourceId: 'file123',
     resourceName: 'Monthly-Report_2025-01.xlsx',
     details: 'Uploaded monthly report to folder: 2025-01',
-    ipAddress: '192.168.1.100',
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    ipAddress: '203.0.113.45',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   },
   {
     id: '4',
@@ -63,8 +64,8 @@ const mockAuditLogs: AuditLog[] = [
     resourceId: 'ERG',
     resourceName: 'ERGO Corporation',
     details: 'Updated ACOS goal from 25% to 30%',
-    ipAddress: '192.168.1.102',
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    ipAddress: '192.0.2.67',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Safari/605.1.15'
   },
   {
     id: '5',
@@ -77,8 +78,8 @@ const mockAuditLogs: AuditLog[] = [
     resourceId: 'LOU',
     resourceName: 'Loungeface Industries',
     details: 'Set client status to inactive',
-    ipAddress: '192.168.1.101',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    ipAddress: '198.51.100.23',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   }
 ];
 
@@ -166,7 +167,25 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const newLog = await addAuditLog(body);
+    
+    // Get real IP address and user agent from the request
+    const requestMetadata = getRequestMetadata(request);
+    
+    // Log the detected IP and user agent for debugging
+    console.log('🌐 Detected IP:', requestMetadata.ipAddress);
+    console.log('🔍 Detected User Agent:', requestMetadata.userAgent);
+    
+    // Override IP and user agent if not provided or if they're the default mock values
+    const enhancedBody = {
+      ...body,
+      ipAddress: !body.ipAddress || body.ipAddress === '192.168.1.100' || body.ipAddress === 'unknown' ? requestMetadata.ipAddress : body.ipAddress,
+      userAgent: !body.userAgent || body.userAgent === 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' || body.userAgent === 'unknown' ? requestMetadata.userAgent : body.userAgent
+    };
+    
+    console.log('📝 Final IP Address:', enhancedBody.ipAddress);
+    console.log('📝 Final User Agent:', enhancedBody.userAgent);
+    
+    const newLog = await addAuditLog(enhancedBody);
     return NextResponse.json(newLog);
   } catch (error) {
     console.error('Error adding audit log:', error);

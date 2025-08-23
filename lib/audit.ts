@@ -19,17 +19,8 @@ const getCurrentUser = () => {
   return null;
 };
 
-// Get client IP address (in a real app, this would come from request headers)
-const getClientIP = () => {
-  // Mock IP for now
-  return '192.168.1.100';
-};
-
-// Get user agent (in a real app, this would come from request headers)
-const getUserAgent = () => {
-  // Mock user agent for now
-  return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
-};
+// Note: IP address and user agent are now handled server-side in the API
+// The API will automatically detect the real IP and user agent from the request
 
 // Add audit log
 export async function addAuditLog(logData: Partial<AuditLogData>, currentUser?: { id: string; name: string; email: string }): Promise<boolean> {
@@ -61,8 +52,8 @@ export async function addAuditLog(logData: Partial<AuditLogData>, currentUser?: 
       resourceId: logData.resourceId!,
       resourceName: logData.resourceName!,
       details: logData.details!,
-      ipAddress: logData.ipAddress || getClientIP(),
-      userAgent: logData.userAgent || getUserAgent()
+      ipAddress: logData.ipAddress || 'unknown',
+      userAgent: logData.userAgent || 'unknown'
     };
 
     const response = await fetch('/api/audit', {
@@ -264,7 +255,6 @@ export const auditHelpers = {
       resourceId: 'auth',
       resourceName: 'Authentication',
       details: `User logged in successfully`,
-      ipAddress: getClientIP(),
       userAgent: userAgent
     }),
 
@@ -278,7 +268,6 @@ export const auditHelpers = {
       resourceId: 'auth',
       resourceName: 'Authentication',
       details: `User logged out`,
-      ipAddress: getClientIP(),
       userAgent: userAgent
     })
 };
