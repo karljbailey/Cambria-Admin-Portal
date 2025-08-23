@@ -27,6 +27,25 @@ interface UserForm {
   generatePassword: boolean;
 }
 
+interface ClientPermission {
+  clientCode: string;
+  clientName: string;
+  permissionType: 'read' | 'write' | 'admin';
+  grantedBy: string;
+  grantedAt: Date;
+  expiresAt?: Date;
+}
+
+interface Client {
+  folderId: string;
+  clientCode: string;
+  clientName: string;
+  fullName: string;
+  acosGoal?: string;
+  tacosGoal?: string;
+  active: boolean;
+}
+
 export default function UsersPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
@@ -53,6 +72,12 @@ export default function UsersPage() {
   const [dialogMode, setDialogMode] = useState<'view' | 'edit'>('view');
   const [showClientPermissions, setShowClientPermissions] = useState(false);
   const [selectedUserForPermissions, setSelectedUserForPermissions] = useState<User | null>(null);
+  const [userClientPermissions, setUserClientPermissions] = useState<ClientPermission[]>([]);
+  const [availableClients, setAvailableClients] = useState<Client[]>([]);
+  const [showPermissionsSection, setShowPermissionsSection] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<string>('');
+  const [selectedPermissionType, setSelectedPermissionType] = useState<'read' | 'write' | 'admin'>('read');
+  const [permissionsLoading, setPermissionsLoading] = useState(false);
 
   const roleOptions = [
     { value: 'basic', label: 'Basic User' },
@@ -103,117 +128,24 @@ export default function UsersPage() {
     return password;
   };
 
-  const handleGeneratePassword = () => {
-    const newPassword = generateRandomPassword();
-    setFormData(prev => ({
-      ...prev,
-      password: newPassword,
-      generatePassword: true
-    }));
+  const handleAddUser = () => {
+    setFormData({
+      email: '',
+      name: '',
+      role: 'basic',
+      password: '',
+      generatePassword: false
+    });
+    setShowAddUser(true);
+    setGeneratedCredentials(null);
+    setUserClientPermissions([]);
+    setAvailableClients([]);
+    setShowPermissionsSection(false);
+    setSelectedClient('');
+    setSelectedPermissionType('read');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormLoading(true);
-
-    try {
-      let finalPassword = formData.password;
-      if (formData.generatePassword && !formData.password) {
-        finalPassword = generateRandomPassword();
-      }
-
-      if (!finalPassword) {
-        alert('Please enter a password or generate one');
-        setFormLoading(false);
-        return;
-      }
-
-      if (editingUser) {
-        // Update existing user - use permissions endpoint
-        const { hash: passwordHash, salt: passwordSalt } = await hashPassword(finalPassword);
-
-        const userData = {
-          email: formData.email,
-          name: formData.name,
-          role: formData.role,
-          passwordHash,
-          passwordSalt,
-          status: 'active' as const
-        };
-
-        const response = await fetch('/api/permissions', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...userData, id: editingUser.id })
-        });
-
-        const data = await response.json();
-        
-        if (data.success) {
-          auditHelpers.permissionsUpdated(formData.name, editingUser.role, formData.role);
-          setShowAddUser(false);
-          setEditingUser(null);
-          setFormData({
-            email: '',
-            name: '',
-            role: 'basic',
-            password: '',
-            generatePassword: false
-          });
-          fetchUsers();
-        } else {
-          alert(data.error || 'Failed to update user');
-        }
-      } else {
-        // Create new user - use new users endpoint
-        const userData = {
-          email: formData.email,
-          name: formData.name,
-          role: formData.role,
-          password: finalPassword
-        };
-
-        const response = await fetch('/api/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(userData)
-        });
-
-        const data = await response.json();
-        
-        if (data.success) {
-          // Show generated credentials if password was generated
-          if (formData.generatePassword) {
-            setGeneratedCredentials({
-              email: formData.email,
-              password: finalPassword,
-              name: formData.name
-            });
-          }
-          
-          setShowAddUser(false);
-          setEditingUser(null);
-          setFormData({
-            email: '',
-            name: '',
-            role: 'basic',
-            password: '',
-            generatePassword: false
-          });
-          fetchUsers();
-        } else {
-          alert(data.error || 'Failed to create user');
-        }
-      }
-    } catch (error) {
-      console.error('Error saving user:', error);
-      alert('Failed to save user');
-    } finally {
-      setFormLoading(false);
-    }
-  };
-
-  const handleEditUser = (user: User) => {
+  const handleEditUser = async (user: User) => {
     setEditingUser(user);
     setFormData({
       email: user.email,
@@ -223,193 +155,233 @@ export default function UsersPage() {
       generatePassword: false
     });
     setShowAddUser(true);
-  };
-
-  const handleEditFromDialog = () => {
-    if (selectedUser) {
-      setFormData({
-        email: selectedUser.email,
-        name: selectedUser.name,
-        role: selectedUser.role,
-        password: '',
-        generatePassword: false
-      });
-      setEditingUser(selectedUser);
-      setDialogMode('edit');
-    }
-  };
-
-  const handleSaveFromDialog = async () => {
-    if (!selectedUser || !selectedUser.id) return;
+    setGeneratedCredentials(null);
     
+    // Load user's client permissions
+    await loadUserPermissions(user.id!);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormLoading(true);
+
     try {
-      setFormLoading(true);
-      
       let finalPassword = formData.password;
-      if (formData.generatePassword && !formData.password) {
+      if (formData.generatePassword) {
         finalPassword = generateRandomPassword();
       }
 
-      const userData: any = {
+      const userData = {
         email: formData.email,
         name: formData.name,
         role: formData.role,
-        status: selectedUser.status,
-        id: selectedUser.id
+        password: finalPassword
       };
 
-      // Only include password fields if a new password is provided
-      if (finalPassword) {
-        const { hash: passwordHash, salt: passwordSalt } = await hashPassword(finalPassword);
-        userData.passwordHash = passwordHash;
-        userData.passwordSalt = passwordSalt;
-      }
+      const url = editingUser ? `/api/permissions/${editingUser.id}` : '/api/permissions';
+      const method = editingUser ? 'PUT' : 'POST';
 
-      const response = await fetch('/api/permissions', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(userData)
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(userData),
       });
 
       const data = await response.json();
-      
-      if (data.success) {
-        // Add audit log
-        auditHelpers.permissionsUpdated(formData.name, selectedUser.role, formData.role);
-        
-        // Show generated credentials if password was generated
-        if (formData.generatePassword && finalPassword) {
-          setGeneratedCredentials({
-            email: formData.email,
-            password: finalPassword,
-            name: formData.name
-          });
+
+              if (response.ok && data.success) {
+          if (!editingUser && formData.generatePassword) {
+            setGeneratedCredentials({
+              email: formData.email,
+              password: finalPassword,
+              name: formData.name
+            });
+          } else {
+            setShowAddUser(false);
+            setEditingUser(null);
+            setUserClientPermissions([]);
+            setAvailableClients([]);
+            setShowPermissionsSection(false);
+            setSelectedClient('');
+            setSelectedPermissionType('read');
+            fetchUsers();
+            auditHelpers.userCreated(formData.email, formData.name);
+          }
+        } else {
+          alert(data.error || 'Failed to save user');
         }
-        
-        // Update the selected user with new data
-        const updatedUser = { ...selectedUser, ...formData };
-        setSelectedUser(updatedUser);
-        setDialogMode('view');
-        setEditingUser(null);
-        fetchUsers();
-      } else {
-        alert(data.error || 'Failed to update user');
-      }
     } catch (error) {
-      console.error('Error updating user:', error);
-      alert('Failed to update user');
+      console.error('Error saving user:', error);
+      alert('Failed to save user');
     } finally {
       setFormLoading(false);
     }
   };
 
-  const handleToggleStatusFromDialog = async () => {
-    if (!selectedUser || !selectedUser.id) return;
-    
-    const newStatus = selectedUser.status === 'active' ? 'inactive' : 'active';
-    
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm('Are you sure you want to delete this user?')) {
+      return;
+    }
+
     try {
-      const response = await fetch('/api/permissions', {
-        method: 'PUT',
+      const response = await fetch(`/api/permissions/${userId}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        fetchUsers();
+        auditHelpers.userDeleted(userId);
+      } else {
+        alert(data.error || 'Failed to delete user');
+      }
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      alert('Failed to delete user');
+    }
+  };
+
+  const handleToggleUserStatus = async (userId: string, currentStatus: string) => {
+    try {
+      const response = await fetch(`/api/permissions/${userId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: currentStatus === 'active' ? 'inactive' : 'active'
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        fetchUsers();
+        auditHelpers.permissionsUpdated('User Status', currentStatus, currentStatus === 'active' ? 'inactive' : 'active');
+      } else {
+        alert(data.error || 'Failed to update user status');
+      }
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      alert('Failed to update user status');
+    }
+  };
+
+  const loadUserPermissions = async (userId: string) => {
+    try {
+      setPermissionsLoading(true);
+      
+      // Fetch user's current client permissions
+      const permissionsResponse = await fetch(`/api/permissions/client?userId=${userId}`);
+      const permissionsData = await permissionsResponse.json();
+      
+      if (permissionsData.success) {
+        setUserClientPermissions(permissionsData.permissions || []);
+      }
+
+      // Fetch available clients
+      const clientsResponse = await fetch(`/api/clients?userId=${user?.id}&forPermissionManagement=true`);
+      const clientsData = await clientsResponse.json();
+      
+      if (clientsResponse.ok) {
+        setAvailableClients(clientsData.clients || []);
+      }
+    } catch (error) {
+      console.error('Error loading user permissions:', error);
+    } finally {
+      setPermissionsLoading(false);
+    }
+  };
+
+  const handleAddClientPermission = async () => {
+    if (!selectedClient || !editingUser) return;
+
+    const client = availableClients.find(c => c.clientCode === selectedClient);
+    if (!client) return;
+
+    try {
+      const response = await fetch('/api/permissions/client', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: selectedUser.id,
-          email: selectedUser.email,
-          name: selectedUser.name,
-          role: selectedUser.role,
-          status: newStatus
+          userId: editingUser.id,
+          clientCode: selectedClient,
+          clientName: client.clientName,
+          permissionType: selectedPermissionType,
+          grantedBy: user?.email || 'admin@cambria.com'
         })
       });
 
       const data = await response.json();
       
       if (data.success) {
-        const updatedUser = { ...selectedUser, status: newStatus as 'active' | 'inactive' };
-        setSelectedUser(updatedUser);
-        auditHelpers.permissionsUpdated(selectedUser.name, selectedUser.status, newStatus);
-        fetchUsers();
+        // Refresh permissions
+        await loadUserPermissions(editingUser.id!);
+        setSelectedClient('');
+        setSelectedPermissionType('read');
       } else {
-        alert(data.error || 'Failed to update user status');
+        alert(data.error || 'Failed to add permission');
       }
     } catch (error) {
-      console.error('Error updating user status:', error);
-      alert('Failed to update user status');
+      console.error('Error adding permission:', error);
+      alert('Failed to add permission');
     }
   };
 
-  const handleDeleteFromDialog = async () => {
-    if (!selectedUser || !selectedUser.id) return;
-    
-    if (!confirm(`Are you sure you want to delete ${selectedUser.name}?`)) return;
+  const handleUpdateClientPermission = async (clientCode: string, newPermissionType: 'read' | 'write' | 'admin') => {
+    if (!editingUser) return;
 
     try {
-      const response = await fetch(`/api/permissions?id=${selectedUser.id}`, {
-        method: 'DELETE'
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        auditHelpers.userDeleted(selectedUser.name);
-        setShowUserDialog(false);
-        setSelectedUser(null);
-        fetchUsers();
-      } else {
-        alert(data.error || 'Failed to delete user');
-      }
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      alert('Failed to delete user');
-    }
-  };
-
-  const handleDeleteUser = async (userId: string, userName: string) => {
-    if (!confirm(`Are you sure you want to delete ${userName}?`)) return;
-
-    try {
-      const response = await fetch(`/api/permissions?id=${userId}`, {
-        method: 'DELETE'
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        auditHelpers.userDeleted(userName);
-        fetchUsers();
-      } else {
-        alert(data.error || 'Failed to delete user');
-      }
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      alert('Failed to delete user');
-    }
-  };
-
-  const handleToggleStatus = async (userId: string, currentStatus: 'active' | 'inactive', userName: string) => {
-    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-    
-    try {
-      const response = await fetch('/api/permissions', {
+      const response = await fetch('/api/permissions/client', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: userId, status: newStatus })
+        body: JSON.stringify({
+          userId: editingUser.id,
+          clientCode,
+          permissionType: newPermissionType
+        })
       });
 
       const data = await response.json();
       
       if (data.success) {
-        auditHelpers.permissionsUpdated(userName, currentStatus, newStatus);
-        fetchUsers();
+        // Refresh permissions
+        await loadUserPermissions(editingUser.id!);
       } else {
-        alert(data.error || 'Failed to update user status');
+        alert(data.error || 'Failed to update permission');
       }
     } catch (error) {
-      console.error('Error updating user status:', error);
-      alert('Failed to update user status');
+      console.error('Error updating permission:', error);
+      alert('Failed to update permission');
     }
   };
 
-  const handleManageClientPermissions = (user: User) => {
+  const handleRemoveClientPermission = async (clientCode: string) => {
+    if (!editingUser || !confirm('Are you sure you want to remove this permission?')) return;
+
+    try {
+      const response = await fetch(`/api/permissions/client?userId=${editingUser.id}&clientCode=${clientCode}`, {
+        method: 'DELETE'
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Refresh permissions
+        await loadUserPermissions(editingUser.id!);
+      } else {
+        alert(data.error || 'Failed to remove permission');
+      }
+    } catch (error) {
+      console.error('Error removing permission:', error);
+      alert('Failed to remove permission');
+    }
+  };
+
+  const handleManagePermissions = (user: User) => {
     setSelectedUserForPermissions(user);
     setShowClientPermissions(true);
   };
@@ -420,51 +392,121 @@ export default function UsersPage() {
     user.role.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getRoleColor = (role: string) => {
-    return role === 'admin' ? 'bg-white text-gray-700 border border-gray-200' : 'bg-white text-gray-700 border border-gray-200';
+  const getPermissionTypeColor = (type: string) => {
+    switch (type) {
+      case 'admin': return 'bg-red-100 text-red-800 border-red-200';
+      case 'write': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'read': return 'bg-green-100 text-green-800 border-green-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
   };
 
-  const getStatusColor = (status: string) => {
-    return status === 'active' ? 'bg-white text-gray-700 border border-gray-200' : 'bg-white text-gray-700 border border-gray-200';
+  const formatDate = (date: Date | string) => {
+    return new Date(date).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading users...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Enhanced Navigation */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
       <EnhancedNavigation user={user} currentPage="users" />
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          <div className="bg-white shadow-sm border border-gray-200 rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-                <div className="flex items-center justify-between mb-4 sm:mb-0">
-                  <h2 className="text-lg font-medium text-gray-900">Users</h2>
+      <main className="max-w-7xl mx-auto py-8 sm:px-6 lg:px-8">
+        <div className="px-4 sm:px-0">
+          {/* Header Section */}
+          <div className="mb-8">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+              <div className="mb-6 lg:mb-0">
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">User Management</h1>
+                <p className="text-gray-600 text-lg">Manage user accounts and permissions</p>
+              </div>
+              
+              {/* Stats Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 lg:ml-8">
+                <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-lg">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-600">Total Users</p>
+                      <p className="text-2xl font-bold text-gray-900">{users.length}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-lg">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-600">Active</p>
+                      <p className="text-2xl font-bold text-gray-900">{users.filter(u => u.status === 'active').length}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-lg">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-600">Admins</p>
+                      <p className="text-2xl font-bold text-gray-900">{users.filter(u => u.role === 'admin').length}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content Card */}
+          <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
+            <div className="p-6 lg:p-8">
+              {/* Header with Search and Actions */}
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-8">
+                <div className="flex items-center justify-between mb-6 lg:mb-0">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-1">User Accounts</h2>
+                    <p className="text-gray-600">Manage user access and permissions</p>
+                  </div>
                   <button
-                    onClick={() => setShowAddUser(true)}
-                    className="ml-4 px-4 py-2 text-sm font-medium text-white bg-gray-700 hover:bg-gray-800 rounded-md transition-colors duration-200 flex items-center"
+                    onClick={handleAddUser}
+                    className="ml-4 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-xl hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transform transition-all duration-200 hover:scale-105 shadow-lg flex items-center"
                   >
-                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                     </svg>
                     Add User
                   </button>
                 </div>
                 
-                {/* Search Bar */}
-                <div className="relative max-w-sm w-full">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                {/* Enhanced Search Bar */}
+                <div className="relative max-w-md w-full">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
@@ -474,53 +516,123 @@ export default function UsersPage() {
                     placeholder="Search users..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    className="block w-full pl-12 pr-12 py-3 border-0 bg-gray-50 rounded-xl text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all duration-200"
                   />
                 </div>
               </div>
 
               {/* Users Table */}
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                                         {filteredUsers.map((user) => (
-                       <tr 
-                         key={user.id} 
-                         className="hover:bg-gray-50 cursor-pointer transition-colors duration-150"
-                         onClick={() => {
-                           setSelectedUser(user);
-                           setDialogMode('view');
-                           setShowUserDialog(true);
-                         }}
-                       >
-                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(user.role)}`}>
-                            {user.role}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(user.status)}`}>
-                            {user.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
-                        </td>
+              <div className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                      <tr className="bg-gray-50/50">
+                        <th scope="col" className="px-3 sm:px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          User
+                        </th>
+                        <th scope="col" className="px-3 sm:px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Role
+                        </th>
+                        <th scope="col" className="px-3 sm:px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th scope="col" className="hidden md:table-cell px-3 sm:px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Last Login
+                        </th>
+                        <th scope="col" className="px-3 sm:px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filteredUsers.map((userItem, index) => (
+                        <tr key={userItem.id || index} className="hover:bg-gray-50/80 transition-colors duration-200">
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 h-8 w-8 sm:h-10 sm:w-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                                <span className="text-xs sm:text-sm font-bold text-white">
+                                  {userItem.name.charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                              <div className="ml-2 sm:ml-4">
+                                <div className="text-xs sm:text-sm font-semibold text-gray-900">{userItem.name}</div>
+                                <div className="text-xs sm:text-sm text-gray-500">{userItem.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${
+                              userItem.role === 'admin' 
+                                ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200' 
+                                : 'bg-gray-100 text-gray-800 ring-1 ring-gray-200'
+                            }`}>
+                              {userItem.role === 'admin' ? 'Admin' : 'Basic'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-center">
+                            <span className={`inline-flex px-2 sm:px-3 py-1 text-xs font-semibold rounded-full ${
+                              userItem.status === 'active' 
+                                ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
+                                : 'bg-red-100 text-red-800 ring-1 ring-red-200'
+                            }`}>
+                              {userItem.status === 'active' ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                          <td className="hidden md:table-cell px-3 sm:px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
+                            {userItem.lastLogin ? new Date(userItem.lastLogin).toLocaleDateString() : 'Never'}
+                          </td>
+                          <td className="px-3 sm:px-6 py-4 whitespace-nowrap text-center">
+                            <div className="flex items-center justify-center space-x-1 sm:space-x-2">
+                              <button
+                                onClick={() => handleEditUser(userItem)}
+                                className="text-blue-600 hover:text-blue-800 p-1 sm:p-2 rounded-lg hover:bg-blue-50 transition-all duration-200"
+                                title="Edit user"
+                              >
+                                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                              
+                              <button
+                                onClick={() => handleManagePermissions(userItem)}
+                                className="text-green-600 hover:text-green-800 p-1 sm:p-2 rounded-lg hover:bg-green-50 transition-all duration-200"
+                                title="Manage permissions"
+                              >
+                                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                              </button>
+                              
+                              <button
+                                onClick={() => handleToggleUserStatus(userItem.id!, userItem.status)}
+                                className={`p-1 sm:p-2 rounded-lg transition-all duration-200 ${
+                                  userItem.status === 'active'
+                                    ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
+                                    : 'text-green-600 hover:text-green-800 hover:bg-green-50'
+                                }`}
+                                title={userItem.status === 'active' ? 'Deactivate user' : 'Activate user'}
+                              >
+                                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                              </button>
+                              
+                              <button
+                                onClick={() => handleDeleteUser(userItem.id!)}
+                                className="text-red-600 hover:text-red-800 p-1 sm:p-2 rounded-lg hover:bg-red-50 transition-all duration-200"
+                                title="Delete user"
+                              >
+                                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -529,358 +641,382 @@ export default function UsersPage() {
 
       {/* Add/Edit User Modal */}
       {showAddUser && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-xl rounded-lg bg-white">
-            <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">
-                {editingUser ? 'Edit User' : 'Add New User'}
-              </h3>
-              
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={formData.email}
-                    onChange={(e) => setFormData({...formData, email: e.target.value})}
-                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    disabled={!!editingUser}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Role</label>
-                  <select
-                    value={formData.role}
-                    onChange={(e) => setFormData({...formData, role: e.target.value as 'admin' | 'basic'})}
-                    className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    {roleOptions.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {!editingUser && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Password</label>
-                    <div className="mt-1 flex space-x-2">
-                      <input
-                        type="text"
-                        value={formData.password}
-                        onChange={(e) => setFormData({...formData, password: e.target.value, generatePassword: false})}
-                        placeholder="Enter password or generate one"
-                        className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleGeneratePassword}
-                        className="px-3 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
-                      >
-                        Generate
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end space-x-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAddUser(false);
-                      setEditingUser(null);
-                      setFormData({
-                        email: '',
-                        name: '',
-                        role: 'basic',
-                        password: '',
-                        generatePassword: false
-                      });
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={formLoading}
-                    className="px-4 py-2 text-sm font-medium text-white bg-gray-700 border border-transparent rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 transition-colors duration-200"
-                  >
-                    {formLoading ? 'Saving...' : (editingUser ? 'Update' : 'Create')}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Generated Credentials Modal */}
-      {generatedCredentials && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">User Credentials</h3>
-              <div className="bg-gray-50 p-4 rounded-md mb-4">
-                <p className="text-sm text-gray-600 mb-2"><strong>Name:</strong> {generatedCredentials.name}</p>
-                <p className="text-sm text-gray-600 mb-2"><strong>Email:</strong> {generatedCredentials.email}</p>
-                <p className="text-sm text-gray-600 mb-2"><strong>Password:</strong> {generatedCredentials.password}</p>
-              </div>
-              <div className="flex justify-end space-x-3">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm overflow-y-auto h-full w-full z-50 p-4">
+          <div className="relative mx-auto w-full max-w-4xl shadow-2xl rounded-2xl bg-white my-8">
+            <div className="p-4 sm:p-6 lg:p-8">
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-2xl font-bold text-gray-900">
+                  {editingUser ? 'Edit User' : 'Add New User'}
+                </h3>
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`Email: ${generatedCredentials.email}\nPassword: ${generatedCredentials.password}`);
-                    alert('Credentials copied to clipboard!');
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  Copy to Clipboard
-                </button>
-                <button
-                  onClick={() => setGeneratedCredentials(null)}
-                  className="px-4 py-2 text-sm font-medium text-white bg-gray-700 border border-transparent rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors duration-200"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-              )}
-
-      {/* User Details Dialog */}
-      {showUserDialog && selectedUser && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-full max-w-2xl shadow-xl rounded-lg bg-white">
-            <div className="mt-3">
-              {/* Dialog Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center space-x-3">
-                  <div className="w-12 h-12 bg-white border border-gray-200 rounded-full flex items-center justify-center">
-                    <span className="text-lg font-medium text-gray-600">
-                      {selectedUser.name.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-medium text-gray-900">{selectedUser.name}</h3>
-                    <p className="text-sm text-gray-500">{selectedUser.email}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowUserDialog(false);
-                    setSelectedUser(null);
-                    setDialogMode('view');
+                    setShowAddUser(false);
                     setEditingUser(null);
+                    setGeneratedCredentials(null);
+                    setUserClientPermissions([]);
+                    setAvailableClients([]);
+                    setShowPermissionsSection(false);
+                    setSelectedClient('');
+                    setSelectedPermissionType('read');
                   }}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
+              <p className="text-gray-600">
+                {editingUser ? 'Update user information and permissions' : 'Create a new user account'}
+              </p>
+            </div>
+            
+            {generatedCredentials ? (
+              <div className="text-center">
+                <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-6">
+                  <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-4">User Created Successfully!</h3>
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-sm font-semibold text-blue-800 mb-3">Generated Credentials:</p>
+                  <div className="space-y-2 text-left">
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Email:</span>
+                      <p className="text-sm text-gray-900 font-mono bg-white p-2 rounded border">{generatedCredentials.email}</p>
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Password:</span>
+                      <p className="text-sm text-gray-900 font-mono bg-white p-2 rounded border">{generatedCredentials.password}</p>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-600 mb-6">
+                  Please save these credentials securely. The password cannot be retrieved later.
+                </p>
+                <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
+                  <button
+                    onClick={() => {
+                      setShowAddUser(false);
+                      setEditingUser(null);
+                      setGeneratedCredentials(null);
+                      setUserClientPermissions([]);
+                      setAvailableClients([]);
+                      setShowPermissionsSection(false);
+                      setSelectedClient('');
+                      setSelectedPermissionType('read');
+                      fetchUsers();
+                    }}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form className="space-y-6" onSubmit={handleSubmit}>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter full name"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="Enter email address"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Role *
+                  </label>
+                  <select
+                    value={formData.role}
+                    onChange={(e) => setFormData({ ...formData, role: e.target.value as 'admin' | 'basic' })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  >
+                    {roleOptions.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Password *
+                  </label>
+                  <div className="space-y-3">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="generatePassword"
+                        checked={formData.generatePassword}
+                        onChange={(e) => setFormData({ ...formData, generatePassword: e.target.checked })}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="generatePassword" className="ml-2 block text-sm text-gray-700">
+                        Generate random password
+                      </label>
+                    </div>
+                    
+                    {!formData.generatePassword && (
+                      <input
+                        type="password"
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Enter password"
+                        required={!formData.generatePassword}
+                      />
+                    )}
+                  </div>
+                </div>
+                
+                {/* Client Permissions Section - Only show when editing */}
+                {editingUser && (
+                  <div className="border-t border-gray-200 pt-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-semibold text-gray-900">Client Permissions</h4>
+                      <button
+                        type="button"
+                        onClick={() => setShowPermissionsSection(!showPermissionsSection)}
+                        className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center"
+                      >
+                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                        </svg>
+                        {showPermissionsSection ? 'Hide' : 'Manage'} Permissions
+                      </button>
+                    </div>
+                    
+                    {showPermissionsSection && (
+                      <div className="space-y-6">
+                        {/* Add New Permission */}
+                        <div className="bg-gray-50 rounded-xl p-4">
+                          <h5 className="text-sm font-semibold text-gray-700 mb-3">Add New Permission</h5>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
+                              <select
+                                value={selectedClient}
+                                onChange={(e) => setSelectedClient(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                <option value="">Select a client</option>
+                                {availableClients
+                                  .filter(client => !userClientPermissions.some(p => p.clientCode === client.clientCode))
+                                  .map(client => (
+                                    <option key={client.clientCode} value={client.clientCode}>
+                                      {client.clientName} ({client.clientCode})
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
 
-              {dialogMode === 'view' ? (
-                /* View Mode */
-                <div className="space-y-6">
-                  {/* User Info */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                      <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getRoleColor(selectedUser.role)}`}>
-                        {selectedUser.role === 'admin' ? 'Administrator' : 'Basic User'}
-                      </span>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                      <span className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(selectedUser.status)}`}>
-                        {selectedUser.status === 'active' ? 'Active' : 'Inactive'}
-                      </span>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Last Login</label>
-                      <p className="text-sm text-gray-900">
-                        {selectedUser.lastLogin ? (
-                          <div>
-                            <div>{new Date(selectedUser.lastLogin).toLocaleDateString()}</div>
-                            <div className="text-xs text-gray-500">
-                              {new Date(selectedUser.lastLogin).toLocaleTimeString()}
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Permission Type</label>
+                              <select
+                                value={selectedPermissionType}
+                                onChange={(e) => setSelectedPermissionType(e.target.value as 'read' | 'write' | 'admin')}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              >
+                                <option value="read">Read Access</option>
+                                <option value="write">Write Access</option>
+                                <option value="admin">Admin Access</option>
+                              </select>
+                            </div>
+
+                            <div className="flex items-end">
+                              <button
+                                type="button"
+                                onClick={handleAddClientPermission}
+                                disabled={!selectedClient || permissionsLoading}
+                                className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-sm font-medium rounded-lg transition-colors duration-200"
+                              >
+                                {permissionsLoading ? 'Adding...' : 'Add Permission'}
+                              </button>
                             </div>
                           </div>
-                        ) : (
-                          <span className="text-gray-400">Never</span>
-                        )}
-                      </p>
-                    </div>
-                    {selectedUser.created_at && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Created</label>
-                        <p className="text-sm text-gray-900">
-                          {new Date(selectedUser.created_at).toLocaleDateString()}
-                        </p>
+                        </div>
+
+                        {/* Current Permissions */}
+                        <div>
+                          <h5 className="text-sm font-semibold text-gray-700 mb-3">Current Permissions</h5>
+                          
+                          {permissionsLoading ? (
+                            <div className="text-center py-8">
+                              <div className="w-6 h-6 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
+                              <p className="text-sm text-gray-500">Loading permissions...</p>
+                            </div>
+                          ) : userClientPermissions.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500">
+                              <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <p className="text-sm">No client permissions assigned</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                      Client
+                                    </th>
+                                    <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                      Permission Type
+                                    </th>
+                                    <th className="hidden sm:table-cell px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                      Granted At
+                                    </th>
+                                    <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                      Actions
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {userClientPermissions.map((permission) => (
+                                    <tr key={permission.clientCode}>
+                                      <td className="px-3 sm:px-4 py-3 whitespace-nowrap">
+                                        <div>
+                                          <div className="text-sm font-medium text-gray-900">{permission.clientName}</div>
+                                          <div className="text-sm text-gray-500">{permission.clientCode}</div>
+                                        </div>
+                                      </td>
+                                      <td className="px-3 sm:px-4 py-3 whitespace-nowrap">
+                                        <select
+                                          value={permission.permissionType}
+                                          onChange={(e) => handleUpdateClientPermission(permission.clientCode, e.target.value as 'read' | 'write' | 'admin')}
+                                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getPermissionTypeColor(permission.permissionType)}`}
+                                        >
+                                          <option value="read">Read Access</option>
+                                          <option value="write">Write Access</option>
+                                          <option value="admin">Admin Access</option>
+                                        </select>
+                                      </td>
+                                      <td className="hidden sm:table-cell px-3 sm:px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                        {formatDate(permission.grantedAt)}
+                                      </td>
+                                      <td className="px-3 sm:px-4 py-3 whitespace-nowrap text-sm font-medium">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveClientPermission(permission.clientCode)}
+                                          className="text-red-600 hover:text-red-900 text-sm"
+                                        >
+                                          Remove
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
-
-                  {/* Actions */}
-                  <div className="flex justify-between items-center pt-6 border-t border-gray-200">
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={() => handleManageClientPermissions(selectedUser)}
-                        className="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-                      >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                        </svg>
-                        Client Permissions
-                      </button>
-                      <button
-                        onClick={handleToggleStatusFromDialog}
-                        className={`inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                          selectedUser.status === 'active'
-                            ? 'text-gray-700 bg-white border border-gray-200 hover:bg-gray-50'
-                            : 'text-gray-700 bg-white border border-gray-200 hover:bg-gray-50'
-                        }`}
-                      >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={selectedUser.status === 'active' ? "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" : "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"} />
-                        </svg>
-                        {selectedUser.status === 'active' ? 'Deactivate' : 'Activate'}
-                      </button>
-                      <button
-                        onClick={handleDeleteFromDialog}
-                        className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors"
-                      >
-                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        Delete
-                      </button>
-                    </div>
-                    <button
-                      onClick={handleEditFromDialog}
-                      className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-700 border border-transparent rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors duration-200"
-                    >
-                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Edit
-                    </button>
-                  </div>
+                )}
+                
+                <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 pt-6">
+                  <button
+                    type="submit"
+                    disabled={formLoading}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-xl hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 transition-all duration-200 transform hover:scale-105 shadow-lg"
+                  >
+                    {formLoading ? (
+                      <span className="flex items-center justify-center">
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                        {editingUser ? 'Updating...' : 'Creating...'}
+                      </span>
+                    ) : (
+                      editingUser ? 'Update User' : 'Create User'
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddUser(false);
+                      setEditingUser(null);
+                      setGeneratedCredentials(null);
+                      setUserClientPermissions([]);
+                      setAvailableClients([]);
+                      setShowPermissionsSection(false);
+                      setSelectedClient('');
+                      setSelectedPermissionType('read');
+                    }}
+                    className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-all duration-200"
+                  >
+                    Cancel
+                  </button>
                 </div>
-              ) : (
-                /* Edit Mode */
-                <form onSubmit={(e) => { e.preventDefault(); handleSaveFromDialog(); }} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Email</label>
-                      <input
-                        type="email"
-                        required
-                        value={formData.email}
-                        onChange={(e) => setFormData({...formData, email: e.target.value})}
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        disabled
-                      />
-                      <p className="mt-1 text-xs text-gray-500">Email cannot be changed</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.name}
-                        onChange={(e) => setFormData({...formData, name: e.target.value})}
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Role</label>
-                      <select
-                        value={formData.role}
-                        onChange={(e) => setFormData({...formData, role: e.target.value as 'admin' | 'basic'})}
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      >
-                        {roleOptions.map(option => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">New Password (Optional)</label>
-                      <div className="mt-1 flex rounded-md shadow-sm">
-                        <input
-                          type="password"
-                          value={formData.password}
-                          onChange={(e) => setFormData({...formData, password: e.target.value})}
-                          className="flex-1 block w-full border border-gray-300 rounded-l-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="Leave blank to keep current password"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleGeneratePassword}
-                          className="inline-flex items-center px-3 py-2 border border-l-0 border-gray-300 rounded-r-md bg-gray-50 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                        >
-                          Generate
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDialogMode('view');
-                        setEditingUser(null);
-                      }}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors duration-200"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={formLoading}
-                      className="px-4 py-2 text-sm font-medium text-white bg-gray-700 border border-transparent rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 transition-colors duration-200"
-                    >
-                      {formLoading ? 'Saving...' : 'Save Changes'}
-                    </button>
-                  </div>
-                </form>
-              )}
+              </form>
+            )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Client Permissions Manager */}
+      {/* Client Permissions Modal */}
       {showClientPermissions && selectedUserForPermissions && (
-        <ClientPermissionsManager
-          userId={selectedUserForPermissions.id!}
-          userName={selectedUserForPermissions.name}
-          currentAdminUserId={user?.id}
-          onClose={() => {
-            setShowClientPermissions(false);
-            setSelectedUserForPermissions(null);
-          }}
-        />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-8 border-0 w-full max-w-4xl shadow-2xl rounded-2xl bg-white">
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-2xl font-bold text-gray-900">
+                  Manage Permissions for {selectedUserForPermissions.name}
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowClientPermissions(false);
+                    setSelectedUserForPermissions(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-gray-600">
+                Assign client access permissions to this user
+              </p>
+            </div>
+            
+                         <ClientPermissionsManager 
+               userId={selectedUserForPermissions.id!}
+               userName={selectedUserForPermissions.name}
+               currentAdminUserId={user?.id}
+               onClose={() => {
+                 setShowClientPermissions(false);
+                 setSelectedUserForPermissions(null);
+               }}
+             />
+          </div>
+        </div>
       )}
-      </div>
-    );
-  }
+    </div>
+  );
+}
