@@ -710,6 +710,7 @@ export async function GET(
     const fileMetadata = await drive.files.get({
       fileId,
       fields: 'name,mimeType',
+      supportsAllDrives: true,  
     });
 
     const fileName = fileMetadata.data.name;
@@ -1170,6 +1171,71 @@ export async function GET(
             fileName: fileName
           },
           { status: 400 }
+        );
+      }
+      
+    } else if (isCSV) {
+      // Handle CSV files
+      console.log(`Processing CSV file: ${fileName} (${mimeType})`);
+      
+      try {
+        console.log('=== CSV DOWNLOAD STARTED ===');
+        
+        // Download CSV content
+        const response = await drive.files.get({
+          fileId,
+          alt: 'media',
+        });
+        
+        console.log('=== CSV DOWNLOAD COMPLETED ===');
+        console.log('CSV response received successfully');
+        
+        let csvContent: string;
+        
+        if (typeof response.data === 'string') {
+          csvContent = response.data;
+        } else if (response.data instanceof Buffer) {
+          csvContent = response.data.toString('utf-8');
+        } else {
+          console.error('Unexpected CSV response data type:', typeof response.data);
+          return NextResponse.json(
+            { error: `CSV file has invalid data type: ${typeof response.data}` },
+            { status: 400 }
+          );
+        }
+        
+        console.log(`CSV content length: ${csvContent.length} characters`);
+        console.log('First 500 characters of CSV:', csvContent.substring(0, 500));
+        
+        console.log('=== PROCESSING CSV FILE ===');
+        try {
+          parsedData = parseCSV(csvContent);
+          console.log('=== CSV PROCESSING COMPLETED ===');
+        } catch (parseError) {
+          console.error('=== CSV PROCESSING FAILED ===');
+          console.error('Error parsing CSV file:', parseError);
+          return NextResponse.json(
+            { 
+              error: 'Failed to parse CSV file',
+              details: parseError instanceof Error ? parseError.message : 'Unknown parsing error',
+              fileType: mimeType,
+              fileName: fileName
+            },
+            { status: 400 }
+          );
+        }
+        
+      } catch (downloadError) {
+        console.error('=== CSV DOWNLOAD FAILED ===');
+        console.error('Error downloading CSV file:', downloadError);
+        return NextResponse.json(
+          { 
+            error: 'Failed to download CSV file',
+            details: downloadError instanceof Error ? downloadError.message : 'Unknown download error',
+            fileType: mimeType,
+            fileName: fileName
+          },
+          { status: 500 }
         );
       }
       

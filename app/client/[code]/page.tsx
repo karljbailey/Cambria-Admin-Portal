@@ -346,9 +346,15 @@ export default function ClientPage() {
             console.log(`  - ${item.name} (${item.mimeType})`);
           });
           
-          const monthlyReportFile = data.items.find((file: any) => 
-            file.name.toLowerCase().includes('monthly-report')
-          );
+          // Debug: Show what we're searching for
+          console.log(`🔍 Searching for monthly report files in ${folder.name}...`);
+          
+          const monthlyReportFile = data.items.find((file: any) => {
+            const fileName = file.name.toLowerCase();
+            const hasMonthlyReport = fileName.includes('monthly-report') || fileName.includes('monthly report');
+            console.log(`  Checking: "${file.name}" -> "${fileName}" -> ${hasMonthlyReport ? 'MATCH' : 'no match'}`);
+            return hasMonthlyReport;
+          });
           
           if (monthlyReportFile) {
             console.log(`📄 Found monthly report file: ${monthlyReportFile.name}`);
@@ -357,6 +363,7 @@ export default function ClientPage() {
             
             if (reportData.ok) {
               console.log(`✅ Successfully processed report for ${folder.name}`);
+              console.log(`📊 Report data keys:`, Object.keys(reportContent));
               const reportWithMonth = {
                 month: folder.name,
                 ...reportContent
@@ -364,6 +371,8 @@ export default function ClientPage() {
               reports.push(reportWithMonth);
             } else {
               console.error(`❌ Failed to fetch report data for ${folder.name}:`, reportContent);
+              console.error(`📊 Response status: ${reportData.status}`);
+              console.error(`📊 Response status text: ${reportData.statusText}`);
               
               // Handle Excel file error specifically
               if (reportContent.error && reportContent.error.includes('Excel files')) {
