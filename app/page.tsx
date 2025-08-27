@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { auditHelpers } from '../lib/audit';
+import { auditHelpers } from '../lib/audit-client';
 import { handleLogout } from '../lib/auth-utils';
 import EnhancedNavigation from '../components/EnhancedNavigation';
 import { useClientPermissions } from '../lib/hooks/useClientPermissions';
@@ -280,7 +280,7 @@ export default function Dashboard() {
           tacosGoal: ''
         });
         
-        auditHelpers.clientCreated(addClientForm.clientCode, addClientForm.fullName, folderId);
+        auditHelpers.clientCreated(addClientForm.fullName, addClientForm.clientCode);
       } else {
         const data = await response.json();
         alert(data.error || 'Failed to add client');

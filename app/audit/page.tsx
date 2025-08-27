@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 // import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { auditHelpers } from '@/lib/audit';
+import { auditHelpers } from '@/lib/audit-client';
 // import { handleLogout } from '@/lib/auth-utils';
 import EnhancedNavigation from '@/components/EnhancedNavigation';
 

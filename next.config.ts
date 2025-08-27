@@ -23,6 +23,17 @@ const nextConfig: NextConfig = {
         assert: false,
         os: false,
         path: false,
+        child_process: false,
+        events: false,
+        util: false,
+        buffer: false,
+        querystring: false,
+        punycode: false,
+        string_decoder: false,
+        timers: false,
+        tty: false,
+        vm: false,
+        worker_threads: false,
       };
     }
     
@@ -35,9 +46,12 @@ const nextConfig: NextConfig = {
     return config;
   },
   
+  // Server external packages (updated from deprecated experimental.serverComponentsExternalPackages)
+  serverExternalPackages: ['firebase-admin'],
+  
   // Experimental features
   experimental: {
-    serverComponentsExternalPackages: ['firebase-admin'],
+    // Remove deprecated serverComponentsExternalPackages
   },
 };
 

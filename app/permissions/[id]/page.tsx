@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { auditHelpers } from '@/lib/audit';
+import { auditHelpers } from '@/lib/audit-client';
 // import { handleLogout } from '@/lib/auth-utils';
 import EnhancedNavigation from '@/components/EnhancedNavigation';
 import { formatGrantedAtDate } from '@/lib/date-utils';
