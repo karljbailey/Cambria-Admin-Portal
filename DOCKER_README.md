@@ -11,7 +11,21 @@ This guide provides instructions for deploying the Cambria Dashboard using Docke
 
 ## 🚀 Quick Start
 
-### 1. Production Deployment
+### Option 1: Automated Deployment (Recommended)
+
+```bash
+# Run the automated deployment script
+./scripts/deploy.sh
+```
+
+This script will:
+- Check Docker installation
+- Validate environment configuration
+- Build and start containers
+- Monitor health status
+- Provide deployment feedback
+
+### Option 2: Manual Deployment
 
 ```bash
 # Build and start the production container
@@ -24,7 +38,7 @@ docker-compose logs -f cambria-dashboard
 docker-compose down
 ```
 
-### 2. Development Deployment
+### Option 3: Development Deployment
 
 ```bash
 # Build and start the development container with hot reloading
@@ -36,6 +50,16 @@ docker-compose logs -f cambria-dashboard-dev
 # Stop the container
 docker-compose down
 ```
+
+## 🔧 Troubleshooting
+
+If you encounter issues, run the troubleshooting script:
+
+```bash
+./scripts/troubleshoot-docker.sh
+```
+
+This will diagnose common problems and provide solutions.
 
 ## 🔧 Manual Docker Commands
 
@@ -99,11 +123,11 @@ NEXT_TELEMETRY_DISABLED=1
 
 The container includes health checks that monitor the application:
 
-- **Endpoint**: `/api/auth/session`
+- **Endpoint**: `/` (root endpoint)
 - **Interval**: 30 seconds
-- **Timeout**: 3 seconds
+- **Timeout**: 10 seconds
 - **Retries**: 3
-- **Start Period**: 5 seconds
+- **Start Period**: 30 seconds
 
 Check container health:
 
@@ -154,6 +178,7 @@ docker inspect cambria-dashboard
    ```bash
    # Fix file permissions
    sudo chown -R $USER:$USER .
+   chmod +x scripts/*.sh
    ```
 
 3. **Build Failures**
@@ -172,6 +197,16 @@ docker inspect cambria-dashboard
    
    # Verify .env file format
    cat .env
+   ```
+
+5. **Container Won't Start**
+   ```bash
+   # Check container logs
+   docker-compose logs
+   
+   # Restart with fresh build
+   docker-compose down --remove-orphans
+   docker-compose up -d --build
    ```
 
 ### Debug Mode
@@ -227,6 +262,7 @@ kubectl get services
 3. **Health Checks**: Monitors application health automatically
 4. **Environment Variables**: Sensitive data stored in environment variables
 5. **Network Isolation**: Uses custom Docker network
+6. **Startup Script**: Validates environment and provides better error handling
 
 ## 📈 Performance Optimization
 
@@ -235,6 +271,7 @@ kubectl get services
 3. **Standalone Output**: Next.js standalone mode for better performance
 4. **Alpine Linux**: Lightweight base image
 5. **Production Dependencies**: Only production dependencies in final image
+6. **Optimized Health Checks**: Uses reliable endpoints with proper timeouts
 
 ## 🔄 CI/CD Integration
 
@@ -287,10 +324,23 @@ docker system prune -f
 
 For issues related to Docker deployment:
 
-1. Check the logs: `docker-compose logs`
-2. Verify environment variables
-3. Ensure ports are available
-4. Check Docker daemon status: `docker info`
+1. Run the troubleshooting script: `./scripts/troubleshoot-docker.sh`
+2. Check the logs: `docker-compose logs`
+3. Verify environment variables
+4. Ensure ports are available
+5. Check Docker daemon status: `docker info`
+
+## 🔧 Recent Fixes
+
+The following issues have been resolved in this version:
+
+1. **Missing curl in production container** - Added curl to runner stage for health checks
+2. **Improved health check reliability** - Changed from `/api/auth/session` to `/` endpoint
+3. **Better startup handling** - Added startup script with environment validation
+4. **Optimized Next.js configuration** - Enhanced standalone output configuration
+5. **Improved error handling** - Better timeout and retry settings
+6. **Added deployment automation** - Automated deployment script with validation
+7. **Enhanced troubleshooting** - Comprehensive troubleshooting script
 
 ---
 
