@@ -39,17 +39,17 @@ export async function hashPassword(password: string): Promise<{ hash: string; sa
   
   try {
     // Generate a random salt
-    const salt = 12;
+    const salt = await bcrypt.genSalt(12);
     
     // Validate salt generation
-    if (!salt) {
+    if (!salt || typeof salt !== 'string' || salt.length === 0) {
       throw new Error('Failed to generate valid salt');
     }
     
-    // Combine password with pepper and salt
+    // Combine password with pepper
     const pepperedPassword = password + PASSWORD_PEPPER;
     
-    // Hash with bcrypt
+    // Hash with bcrypt using the generated salt
     const hash = await bcrypt.hash(pepperedPassword, salt);
     
     // Validate hash result
@@ -57,7 +57,7 @@ export async function hashPassword(password: string): Promise<{ hash: string; sa
       throw new Error('Failed to generate valid hash');
     }
     
-    return { hash, salt: salt.toString() };
+    return { hash, salt };
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Password hashing failed: ${error.message}`);

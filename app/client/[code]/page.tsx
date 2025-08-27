@@ -131,6 +131,7 @@ export default function ClientPage() {
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [user, setUser] = useState<{ id: string; email: string; name?: string; role?: string } | null>(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   // Client permissions hook - simplified since filtering is now at API level
   const {
@@ -258,21 +259,39 @@ export default function ClientPage() {
   }, [monthlyReports, availableMonths, selectedMonth]);
 
   const fetchFolderData = async () => {
-    if (!client?.folderId) return;
+    if (!client?.folderId) {
+      console.log('❌ No folder ID available for client');
+      return;
+    }
+    
+    console.log('📁 Fetching folder data for folderId:', client.folderId);
     
     try {
       setFolderLoading(true);
       const response = await fetch(`/api/folder/${client.folderId}`);
       const data = await response.json();
       
+      console.log('📁 Folder API response:', {
+        status: response.status,
+        ok: response.ok,
+        itemsCount: data.items?.length || 0,
+        error: data.error
+      });
+      
       if (response.ok) {
+        console.log('✅ Folder data fetched successfully');
+        console.log('📁 Folder items:', data.items?.map((item: any) => ({
+          name: item.name,
+          mimeType: item.mimeType,
+          id: item.id
+        })));
         setFolderData(data.items || []);
       } else {
-        console.error('Failed to fetch folder data:', data.error);
+        console.error('❌ Failed to fetch folder data:', data.error);
         setFolderData([]);
       }
     } catch (err) {
-      console.error('Error fetching folder data:', err);
+      console.error('❌ Error fetching folder data:', err);
       setFolderData([]);
     } finally {
       setFolderLoading(false);
@@ -280,6 +299,8 @@ export default function ClientPage() {
   };
 
   const fetchMonthlyReports = async () => {
+    console.log('📊 Starting fetchMonthlyReports with folderData:', folderData.length, 'items');
+    
     try {
       setReportLoading(true);
       
@@ -288,7 +309,21 @@ export default function ClientPage() {
         /^\d{4}-\d{2}$/.test(item.name)
       );
 
+      console.log('📊 Monthly folders found:', monthlyFolders.length);
+      monthlyFolders.forEach((folder: FolderItem) => {
+        console.log(`  - ${folder.name} (ID: ${folder.id})`);
+      });
 
+      if (monthlyFolders.length === 0) {
+        console.log('⚠️ No monthly folders found. Available folders:');
+        const allFolders = folderData.filter(item => item.mimeType === 'application/vnd.google-apps.folder');
+        allFolders.forEach(folder => {
+          console.log(`  - ${folder.name} (doesn't match YYYY-MM pattern)`);
+        });
+        setMonthlyReports([]);
+        setAvailableMonths([]);
+        return;
+      }
 
       // Sort folders by date (newest first)
       monthlyFolders.sort((a, b) => b.name.localeCompare(a.name));
@@ -299,45 +334,67 @@ export default function ClientPage() {
       const reports: MonthlyReport[] = [];
       
       for (const folder of monthlyFolders) {
+        console.log(`📁 Fetching contents of monthly folder: ${folder.name}`);
         const response = await fetch(`/api/folder/${folder.id}`);
         const data = await response.json();
         
         if (response.ok && data.items) {
+          console.log(`📁 Found ${data.items.length} items in ${folder.name}`);
+          
+          // Log all files in the folder for debugging
+          data.items.forEach((item: any) => {
+            console.log(`  - ${item.name} (${item.mimeType})`);
+          });
           
           const monthlyReportFile = data.items.find((file: any) => 
             file.name.toLowerCase().includes('monthly-report')
           );
           
           if (monthlyReportFile) {
+            console.log(`📄 Found monthly report file: ${monthlyReportFile.name}`);
             const reportData = await fetch(`/api/file/${monthlyReportFile.id}?userId=${user?.id}&clientCode=${clientCode}`);
             const reportContent = await reportData.json();
             
             if (reportData.ok) {
+              console.log(`✅ Successfully processed report for ${folder.name}`);
               const reportWithMonth = {
                 month: folder.name,
                 ...reportContent
               };
               reports.push(reportWithMonth);
             } else {
-              console.error(`Failed to fetch report data for ${folder.name}:`, reportContent);
+              console.error(`❌ Failed to fetch report data for ${folder.name}:`, reportContent);
               
               // Handle Excel file error specifically
               if (reportContent.error && reportContent.error.includes('Excel files')) {
-                console.warn(`Excel file detected in ${folder.name}: ${reportContent.fileName}`);
+                console.warn(`⚠️ Excel file detected in ${folder.name}: ${reportContent.fileName}`);
               }
             }
+          } else {
+            console.log(`⚠️ No monthly report file found in ${folder.name}`);
+            console.log(`📁 Available files in ${folder.name}:`);
+            data.items.forEach((item: any) => {
+              console.log(`  - ${item.name}`);
+            });
           }
+        } else {
+          console.error(`❌ Failed to fetch folder contents for ${folder.name}:`, data);
         }
       }
+      
+      console.log(`📊 Processed ${reports.length} monthly reports`);
       setMonthlyReports(reports);
+      
       if (reports.length > 0) {
         setSelectedMonth(reports[0].month); // Select the first (latest) month
+        console.log(`✅ Selected month: ${reports[0].month}`);
       } else if (availableMonths.length > 0) {
         // If no reports found but we have folders, select the latest folder
         setSelectedMonth(availableMonths[0]);
+        console.log(`⚠️ No reports found, selected latest month: ${availableMonths[0]}`);
       }
     } catch (err) {
-      console.error('Error fetching monthly reports:', err);
+      console.error('❌ Error fetching monthly reports:', err);
     } finally {
       setReportLoading(false);
     }
@@ -833,19 +890,92 @@ export default function ClientPage() {
                 </ol>
               </nav>
 
+              {/* Debug Panel */}
+              <div className="mb-6">
+                <button
+                  onClick={() => setShowDebug(!showDebug)}
+                  className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {showDebug ? 'Hide Debug Info' : 'Show Debug Info'}
+                </button>
+                
+                {showDebug && (
+                  <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-yellow-800 mb-3">Debug Information</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Client Code:</span>
+                        <span className="font-mono text-yellow-900">{clientCode}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Folder ID:</span>
+                        <span className="font-mono text-yellow-900 break-all">{client.folderId}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Folder Items:</span>
+                        <span className="font-mono text-yellow-900">{folderData.length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Monthly Reports:</span>
+                        <span className="font-mono text-yellow-900">{monthlyReports.length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Available Months:</span>
+                        <span className="font-mono text-yellow-900">{availableMonths.join(', ') || 'None'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Selected Month:</span>
+                        <span className="font-mono text-yellow-900">{selectedMonth || 'None'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-yellow-700">Loading States:</span>
+                        <span className="font-mono text-yellow-900">
+                          Folder: {folderLoading ? 'Yes' : 'No'}, Reports: {reportLoading ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-yellow-200">
+                        <p className="text-yellow-700 text-xs">
+                          💡 Check browser console (F12) for detailed logs about data fetching and processing.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h2 className="text-3xl font-bold text-gray-900 mb-2">{client.fullName}</h2>
                   <p className="text-gray-600 text-lg">Client dashboard and analytics</p>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <span className={`inline-flex px-4 py-2 text-sm font-semibold rounded-xl ${
-                    client.active 
-                      ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
-                      : 'bg-red-100 text-red-800 ring-1 ring-red-200'
-                  }`}>
-                    {client.active ? 'Active' : 'Inactive'}
-                  </span>
+                  <div className="relative group">
+                    <span className={`inline-flex px-4 py-2 text-sm font-semibold rounded-xl cursor-help ${
+                      client.active 
+                        ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
+                        : 'bg-red-100 text-red-800 ring-1 ring-red-200'
+                    }`}>
+                      {client.active ? 'Active' : 'Inactive'}
+                    </span>
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+                      <div className="text-center">
+                        <p className="font-medium mb-1">Client Status</p>
+                        <p className="text-gray-300">
+                          {client.active 
+                            ? 'Active clients will have reports generated by n8n automation'
+                            : 'Inactive clients will not have reports generated by n8n automation'
+                          }
+                        </p>
+                      </div>
+                      {/* Arrow */}
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                  </div>
                   {canWriteClient(clientCode) && (
                     <button
                       onClick={handleEdit}
@@ -877,9 +1007,39 @@ export default function ClientPage() {
                       <dt className="text-sm font-semibold text-gray-600">Client Name</dt>
                       <dd data-testid="client-name" className="text-sm font-medium text-gray-900">{client.clientName}</dd>
                     </div>
-                    <div className="flex justify-between items-center py-3">
+                    <div className="flex justify-between items-center py-3 border-b border-gray-100">
                       <dt className="text-sm font-semibold text-gray-600">Full Name</dt>
                       <dd className="text-sm font-medium text-gray-900">{client.fullName}</dd>
+                    </div>
+                    <div className="flex justify-between items-center py-3">
+                      <dt className="text-sm font-semibold text-gray-600 flex items-center">
+                        Status
+                        <div className="relative group ml-1">
+                          <svg className="w-4 h-4 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          {/* Tooltip */}
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10">
+                            <div className="text-center">
+                              <p className="font-medium mb-1">Client Status</p>
+                              <p className="text-gray-300">
+                                Active clients will have reports generated by n8n automation. Inactive clients will not.
+                              </p>
+                            </div>
+                            {/* Arrow */}
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                          </div>
+                        </div>
+                      </dt>
+                      <dd className="text-sm font-medium text-gray-900">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-lg ${
+                          client.active 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {client.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </dd>
                     </div>
                   </dl>
                 </div>
@@ -914,6 +1074,37 @@ export default function ClientPage() {
                     </div>
                   </dl>
                 </div>
+              </div>
+
+              {/* Manual Refresh Section */}
+              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-blue-800 mb-3">Data Refresh</h4>
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={fetchFolderData}
+                    disabled={folderLoading}
+                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    {folderLoading ? 'Refreshing...' : 'Refresh Folder Data'}
+                  </button>
+                  
+                  <button
+                    onClick={fetchMonthlyReports}
+                    disabled={reportLoading || folderData.length === 0}
+                    className="inline-flex items-center px-3 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-lg hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    {reportLoading ? 'Processing...' : 'Refresh Monthly Reports'}
+                  </button>
+                </div>
+                <p className="text-xs text-blue-600 mt-2">
+                  Use these buttons to manually refresh data if it's not loading automatically.
+                </p>
               </div>
 
               {/* Edit Form Modal */}

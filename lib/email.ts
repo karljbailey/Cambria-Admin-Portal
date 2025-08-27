@@ -107,3 +107,56 @@ export const sendTestEmail = async (toEmail: string): Promise<boolean> => {
     return false;
   }
 };
+
+// Send new user welcome email with credentials
+export const sendNewUserWelcomeEmail = async (
+  userEmail: string,
+  userName: string,
+  password: string,
+  userRole: string,
+  loginUrl: string = '/login'
+): Promise<boolean> => {
+  try {
+    // Verify email configuration first
+    if (!emailConfig.auth.user || !emailConfig.auth.pass) {
+      console.error('Email configuration missing: SMTP_USER or SMTP_PASS not set');
+      return false;
+    }
+
+    const template = loadTemplate('new-user-welcome');
+    
+    const html = template({
+      userEmail,
+      userName,
+      password,
+      userRole: userRole.charAt(0).toUpperCase() + userRole.slice(1), // Capitalize role
+      loginUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}${loginUrl}`,
+    });
+
+    const mailOptions = {
+      from: `"Cambria Portal" <${emailConfig.auth.user}>`,
+      to: userEmail,
+      subject: 'Welcome to Cambria Portal - Your Account Details',
+      html,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Welcome email sent successfully to ${userEmail}`);
+    return true;
+  } catch (error) {
+    console.error('Error sending welcome email:', error);
+    
+    // Provide more specific error information
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'EAUTH') {
+        console.error('Authentication failed - check SMTP credentials');
+      } else if (error.code === 'ECONNECTION') {
+        console.error('Connection failed - check SMTP host and port');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error('Connection timeout - check network or SMTP settings');
+      }
+    }
+    
+    return false;
+  }
+};

@@ -3,6 +3,7 @@ import { initializeApp, isFirebaseConfigured } from '@/lib/init';
 import { usersService } from '@/lib/collections';
 import { hashPassword } from '@/lib/auth';
 import { auditHelpers } from '@/lib/audit';
+import { sendNewUserWelcomeEmail } from '@/lib/email';
 
 // Initialize Firebase if configured
 if (isFirebaseConfigured()) {
@@ -92,9 +93,26 @@ export async function POST(request: NextRequest) {
     const newUser = await usersService.add(userData);
     console.log(`✅ User created in Firebase with ID: ${newUser.id}`);
 
+    // Send welcome email with credentials
+    try {
+      const emailSent = await sendNewUserWelcomeEmail(email, name, password, role);
+      if (emailSent) {
+        console.log(`📧 Welcome email sent successfully to ${email}`);
+      } else {
+        console.warn(`⚠️ Failed to send welcome email to ${email}`);
+      }
+    } catch (error) {
+      console.error('Error sending welcome email:', error);
+      // Don't fail the user creation if email sending fails
+    }
+
     // Add audit log for user creation
     try {
-      await auditHelpers.userCreated(name, email);
+      await auditHelpers.userCreated(name, email, {
+        id: 'system',
+        name: 'System',
+        email: 'system@cambria.com'
+      });
       console.log(`📝 Audit log created for user creation: ${email}`);
     } catch (error) {
       console.error('Error creating audit log:', error);
@@ -148,6 +166,7 @@ export async function GET() {
       role: user.role,
       status: user.status,
       lastLogin: user.lastLogin,
+      clientPermissions: user.clientPermissions || [],
       created_at: user.created_at,
       updated_at: user.updated_at
     }));

@@ -67,3 +67,4 @@ export function getRequestMetadata(request: NextRequest) {
     host: request.headers.get('host') || '',
   };
 }
+

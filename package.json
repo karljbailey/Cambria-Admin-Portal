@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:email": "node scripts/test-email-config.js",
+    "test:new-user-email": "node scripts/test-new-user-email.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

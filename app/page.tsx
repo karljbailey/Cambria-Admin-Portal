@@ -532,7 +532,7 @@ export default function Dashboard() {
                                         View Details
                                       </Link>
                                       
-                                      {canWriteClient(client.clientCode) && (
+                                      {/* {canWriteClient(client.clientCode) && (
                                         <button
                                           onClick={() => toggleClientStatus(client.clientCode, client.active)}
                                           disabled={updatingClient === client.clientCode}
@@ -543,7 +543,7 @@ export default function Dashboard() {
                                           </svg>
                                           {updatingClient === client.clientCode ? 'Updating...' : (client.active ? 'Deactivate' : 'Activate')}
                                         </button>
-                                      )}
+                                      )} */}
                                     </div>
                                   </div>
                                 )}

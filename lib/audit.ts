@@ -29,17 +29,35 @@ export async function addAuditLog(logData: Partial<AuditLogData>, currentUser?: 
     let userInfo = currentUser;
     if (!userInfo) {
       try {
-        const sessionResponse = await fetch('/api/auth/session');
-        const sessionData = await sessionResponse.json();
-        if (sessionData.authenticated && sessionData.user) {
+        // Check if we're in a server-side context
+        const isServer = typeof window === 'undefined';
+        if (isServer) {
+          // In server context, we can't fetch session, so use defaults
           userInfo = {
-            id: sessionData.user.id || sessionData.user.email,
-            name: sessionData.user.name,
-            email: sessionData.user.email
+            id: 'system',
+            name: 'System',
+            email: 'system@cambria.com'
           };
+        } else {
+          // In client context, fetch session
+          const sessionResponse = await fetch('/api/auth/session');
+          const sessionData = await sessionResponse.json();
+          if (sessionData.authenticated && sessionData.user) {
+            userInfo = {
+              id: sessionData.user.id || sessionData.user.email,
+              name: sessionData.user.name,
+              email: sessionData.user.email
+            };
+          }
         }
       } catch (error) {
         console.error('Error fetching session for audit log:', error);
+        // Use defaults if session fetch fails
+        userInfo = {
+          id: 'unknown',
+          name: 'Unknown User',
+          email: 'unknown@example.com'
+        };
       }
     }
 
@@ -56,22 +74,38 @@ export async function addAuditLog(logData: Partial<AuditLogData>, currentUser?: 
       userAgent: logData.userAgent || 'unknown'
     };
 
-    const response = await fetch('/api/audit', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(fullLogData),
-    });
+    // Check if we're in a server-side context
+    const isServer = typeof window === 'undefined';
+    if (isServer) {
+      // In server context, directly add to audit logs collection
+      try {
+        const { auditLogsService } = await import('./collections');
+        await auditLogsService.add(fullLogData);
+        console.log('✅ Audit log added successfully (server-side)');
+        return true;
+      } catch (error) {
+        console.error('Error adding audit log (server-side):', error);
+        return false;
+      }
+    } else {
+      // In client context, use fetch
+      const response = await fetch('/api/audit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(fullLogData),
+      });
 
-    if (!response.ok) {
-      console.error('Failed to add audit log:', response.statusText);
-      return false;
+      if (!response.ok) {
+        console.error('Failed to add audit log:', response.statusText);
+        return false;
+      }
+
+      const result = await response.json();
+      console.log('✅ Audit log added successfully:', result.id);
+      return true;
     }
-
-    const result = await response.json();
-    console.log('✅ Audit log added successfully:', result.id);
-    return true;
   } catch (error) {
     console.error('Error adding audit log:', error);
     return false;
@@ -208,23 +242,23 @@ export const auditHelpers = {
       details: `Changed user permissions from ${oldPermission} to ${newPermission}`
     }),
 
-  userCreated: (userName: string, userEmail: string) =>
+  userCreated: (userName: string, userEmail: string, currentUser?: { id: string; name: string; email: string }) =>
     addAuditLog({
       action: AUDIT_ACTIONS.CREATE_USER,
       resource: AUDIT_RESOURCES.USER,
       resourceId: `user_${Date.now()}`,
       resourceName: userName,
       details: `Created new user: ${userEmail}`
-    }),
+    }, currentUser),
 
-  userDeleted: (userName: string) =>
+  userDeleted: (userName: string, currentUser?: { id: string; name: string; email: string }) =>
     addAuditLog({
       action: AUDIT_ACTIONS.DELETE_USER,
       resource: AUDIT_RESOURCES.USER,
       resourceId: `user_${Date.now()}`,
       resourceName: userName,
       details: 'Deleted user account'
-    }),
+    }, currentUser),
 
   userViewed: (userName: string, userEmail: string) =>
     addAuditLog({
