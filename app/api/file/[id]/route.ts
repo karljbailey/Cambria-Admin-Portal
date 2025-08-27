@@ -710,6 +710,7 @@ export async function GET(
     const fileMetadata = await drive.files.get({
       fileId,
       fields: 'name,mimeType',
+      supportsAllDrives: true,
     });
 
     const fileName = fileMetadata.data.name;
