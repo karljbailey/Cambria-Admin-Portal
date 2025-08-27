@@ -43,8 +43,8 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Install dependencies needed for runtime and health checks
-RUN apk add --no-cache libc6-compat curl
+# Install dependencies needed for runtime
+RUN apk add --no-cache libc6-compat
 
 # Copy built application from builder stage
 COPY --from=builder /app/public ./public
@@ -56,10 +56,6 @@ RUN chown nextjs:nodejs .next
 # Automatically leverage output traces to reduce image size
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Copy startup script and make it executable
-COPY --from=builder --chown=nextjs:nodejs /app/scripts/start.sh ./start.sh
-RUN chmod +x ./start.sh
 
 # Copy environment files if they exist
 COPY --from=builder /app/.env* ./
@@ -76,9 +72,9 @@ ENV HOSTNAME="0.0.0.0"
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Health check - use a more reliable endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:3000/ || exit 1
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/api/auth/session || exit 1
 
-# Start the application using the startup script
-CMD ["./start.sh"]
+# Start the application
+CMD ["node", "server.js"]

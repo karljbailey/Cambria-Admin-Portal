@@ -38,6 +38,8 @@ export async function GET(
       q: `'${folderId}' in parents and trashed=false`,
       fields: 'files(id,name,mimeType,webViewLink)',
       orderBy: 'name',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     const files = response.data.files || [];
