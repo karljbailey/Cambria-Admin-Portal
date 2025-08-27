@@ -193,6 +193,28 @@ export async function POST(request: NextRequest) {
     // Log successful upload
     console.log(`✅ File uploaded successfully: ${file.name} (${response.data.id})`);
 
+    // Update the Google Sheet to mark "New Documents" as TRUE for this client
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+      const updateSheetResponse = await fetch(`${baseUrl}/api/clients/update-sheet`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ folderId }),
+      });
+
+      if (updateSheetResponse.ok) {
+        const updateResult = await updateSheetResponse.json();
+        console.log(`✅ Sheet updated successfully for folder ${folderId}:`, updateResult);
+      } else {
+        console.warn(`⚠️ Failed to update sheet for folder ${folderId}:`, await updateSheetResponse.text());
+      }
+    } catch (sheetError) {
+      console.error('Error updating sheet:', sheetError);
+      // Don't fail the upload if sheet update fails
+    }
+
     return NextResponse.json({
       success: true,
       fileId: response.data.id,

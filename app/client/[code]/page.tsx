@@ -781,6 +781,34 @@ export default function ClientPage() {
     }
   };
 
+  // Reset "New Documents" status in Google Sheet
+  const handleResetNewDocuments = async () => {
+    if (!client) return;
+    
+    try {
+      const response = await fetch('/api/clients/reset-new-documents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ folderId: client.folderId }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ New Documents status reset successfully:', result);
+        alert('New Documents status has been reset to FALSE');
+      } else {
+        const error = await response.json();
+        console.error('❌ Failed to reset New Documents status:', error);
+        alert(`Failed to reset New Documents status: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error resetting New Documents status:', error);
+      alert('Failed to reset New Documents status');
+    }
+  };
+
   if (loading || permissionsLoading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -1056,7 +1084,7 @@ export default function ClientPage() {
                       <dt className="text-sm font-semibold text-gray-600">Folder ID</dt>
                       <dd className="text-sm font-medium text-gray-900 font-mono break-all bg-gray-100 px-3 py-1 rounded-lg max-w-xs truncate" title={client.folderId}>{client.folderId}</dd>
                     </div>
-                    <div className="flex justify-between items-center py-3">
+                    <div className="flex justify-between items-center py-3 border-b border-gray-100">
                       <dt className="text-sm font-semibold text-gray-600">Google Drive</dt>
                       <dd className="text-sm font-medium text-gray-900">
                         <a
@@ -1070,6 +1098,21 @@ export default function ClientPage() {
                           </svg>
                           View Folder
                         </a>
+                      </dd>
+                    </div>
+                    <div className="flex justify-between items-center py-3">
+                      <dt className="text-sm font-semibold text-gray-600">New Documents Status</dt>
+                      <dd className="text-sm font-medium text-gray-900">
+                        <button
+                          onClick={handleResetNewDocuments}
+                          className="inline-flex items-center px-3 py-1 text-xs font-medium text-orange-700 bg-orange-100 rounded-lg hover:bg-orange-200 transition-colors duration-200"
+                          title="Reset New Documents status to FALSE in Google Sheet"
+                        >
+                          <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Reset Status
+                        </button>
                       </dd>
                     </div>
                   </dl>
