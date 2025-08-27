@@ -185,6 +185,32 @@ export async function POST(request: NextRequest) {
     console.log('📝 Final IP Address:', enhancedBody.ipAddress);
     console.log('📝 Final User Agent:', enhancedBody.userAgent);
     
+    // Check for recent duplicate logs (server-side deduplication)
+    if (isFirebaseConfigured()) {
+      try {
+        const recentLogs = await auditLogsService.getAll();
+        const now = new Date();
+        const fiveSecondsAgo = new Date(now.getTime() - 5000);
+        
+        // Check for duplicate in the last 5 seconds
+        const isDuplicate = recentLogs.some(log => 
+          log.userId === enhancedBody.userId &&
+          log.action === enhancedBody.action &&
+          log.resource === enhancedBody.resource &&
+          log.resourceId === enhancedBody.resourceId &&
+          new Date(log.timestamp) > fiveSecondsAgo
+        );
+        
+        if (isDuplicate) {
+          console.log('🔄 Skipping duplicate audit log (server-side):', enhancedBody.action, 'on', enhancedBody.resource);
+          return NextResponse.json({ id: 'duplicate-skipped', message: 'Duplicate log skipped' });
+        }
+      } catch (error) {
+        console.warn('Could not check for duplicates:', error);
+        // Continue with log creation if duplicate check fails
+      }
+    }
+    
     const newLog = await addAuditLog(enhancedBody);
     return NextResponse.json(newLog);
   } catch (error) {

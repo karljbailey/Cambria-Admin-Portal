@@ -318,7 +318,7 @@ export default function Dashboard() {
               </div>
               
               {/* Stats Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 lg:ml-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:ml-8">
                 <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-lg">
                   <div className="flex items-center">
                     <div className="p-2 bg-blue-100 rounded-lg">
@@ -347,7 +347,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 
-                <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-lg">
+                {/* <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/20 shadow-lg">
                   <div className="flex items-center">
                     <div className="p-2 bg-purple-100 rounded-lg">
                       <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -359,7 +359,7 @@ export default function Dashboard() {
                       <p className="text-2xl font-bold text-gray-900">98%</p>
                     </div>
                   </div>
-                </div>
+                </div> */}
               </div>
             </div>
           </div>

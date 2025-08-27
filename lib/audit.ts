@@ -22,9 +22,47 @@ const getCurrentUser = () => {
 // Note: IP address and user agent are now handled server-side in the API
 // The API will automatically detect the real IP and user agent from the request
 
-// Add audit log
+// Add audit log with deduplication
 export async function addAuditLog(logData: Partial<AuditLogData>, currentUser?: { id: string; name: string; email: string }): Promise<boolean> {
   try {
+    // Create a unique key for deduplication
+    const dedupKey = `${logData.userId || 'unknown'}-${logData.action}-${logData.resource}-${logData.resourceId}-${Date.now()}`;
+    
+    // Check if we're in a browser environment and use sessionStorage for deduplication
+    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
+      const recentLogs = JSON.parse(sessionStorage.getItem('recentAuditLogs') || '[]');
+      const now = Date.now();
+      const fiveSecondsAgo = now - 5000; // 5 second window
+      
+      // Clean old entries
+      const filteredLogs = recentLogs.filter((log: any) => log.timestamp > fiveSecondsAgo);
+      
+      // Check for duplicate in the last 5 seconds
+      const isDuplicate = filteredLogs.some((log: any) => 
+        log.userId === (logData.userId || 'unknown') &&
+        log.action === logData.action &&
+        log.resource === logData.resource &&
+        log.resourceId === logData.resourceId &&
+        log.timestamp > fiveSecondsAgo
+      );
+      
+      if (isDuplicate) {
+        console.log('🔄 Skipping duplicate audit log:', logData.action, 'on', logData.resource);
+        return true; // Return true to avoid error handling
+      }
+      
+      // Add current log to recent logs
+      filteredLogs.push({
+        userId: logData.userId || 'unknown',
+        action: logData.action,
+        resource: logData.resource,
+        resourceId: logData.resourceId,
+        timestamp: now
+      });
+      
+      sessionStorage.setItem('recentAuditLogs', JSON.stringify(filteredLogs));
+    }
+
     // Get current user from session if not provided
     let userInfo = currentUser;
     if (!userInfo) {
@@ -112,6 +150,27 @@ export async function addAuditLog(logData: Partial<AuditLogData>, currentUser?: 
   }
 }
 
+// Debounce utility for audit logs
+const auditDebounceMap = new Map<string, NodeJS.Timeout>();
+
+const debounceAuditLog = (key: string, callback: () => Promise<boolean>, delay: number = 1000): Promise<boolean> => {
+  return new Promise((resolve) => {
+    // Clear existing timeout
+    if (auditDebounceMap.has(key)) {
+      clearTimeout(auditDebounceMap.get(key)!);
+    }
+    
+    // Set new timeout
+    const timeout = setTimeout(async () => {
+      auditDebounceMap.delete(key);
+      const result = await callback();
+      resolve(result);
+    }, delay);
+    
+    auditDebounceMap.set(key, timeout);
+  });
+};
+
 // Predefined audit actions
 export const AUDIT_ACTIONS = {
   // Client actions
@@ -158,32 +217,38 @@ export const AUDIT_RESOURCES = {
 // Helper functions for common audit scenarios
 export const auditHelpers = {
   // Client audit helpers
-  clientCreated: (clientCode: string, clientName: string, folderId: string) => 
-    addAuditLog({
+  clientCreated: (clientCode: string, clientName: string, folderId: string) => {
+    const key = `client-created-${clientCode}`;
+    return debounceAuditLog(key, () => addAuditLog({
       action: AUDIT_ACTIONS.CREATE_CLIENT,
       resource: AUDIT_RESOURCES.CLIENT,
       resourceId: clientCode,
       resourceName: clientName,
       details: `Created new client with folder ID: ${folderId}`
-    }),
+    }));
+  },
 
-  clientUpdated: (clientCode: string, clientName: string, details: string) =>
-    addAuditLog({
+  clientUpdated: (clientCode: string, clientName: string, details: string) => {
+    const key = `client-updated-${clientCode}`;
+    return debounceAuditLog(key, () => addAuditLog({
       action: AUDIT_ACTIONS.UPDATE_CLIENT,
       resource: AUDIT_RESOURCES.CLIENT,
       resourceId: clientCode,
       resourceName: clientName,
       details
-    }),
+    }));
+  },
 
-  clientStatusToggled: (clientCode: string, clientName: string, newStatus: boolean) =>
-    addAuditLog({
+  clientStatusToggled: (clientCode: string, clientName: string, newStatus: boolean) => {
+    const key = `client-status-${clientCode}`;
+    return debounceAuditLog(key, () => addAuditLog({
       action: AUDIT_ACTIONS.TOGGLE_CLIENT_STATUS,
       resource: AUDIT_RESOURCES.CLIENT,
       resourceId: clientCode,
       resourceName: clientName,
-      details: `Set client status to ${newStatus ? 'active' : 'inactive'}`
-    }),
+      details: `Client status changed to ${newStatus ? 'active' : 'inactive'}`
+    }));
+  },
 
   clientViewed: (clientCode: string, clientName: string) =>
     addAuditLog({
@@ -233,32 +298,38 @@ export const auditHelpers = {
     }),
 
   // Permission audit helpers
-  permissionsUpdated: (targetUserName: string, oldPermission: string, newPermission: string) =>
-    addAuditLog({
+  permissionsUpdated: (targetUserName: string, oldPermission: string, newPermission: string) => {
+    const key = `permissions-updated-${targetUserName}`;
+    return debounceAuditLog(key, () => addAuditLog({
       action: AUDIT_ACTIONS.UPDATE_PERMISSIONS,
       resource: AUDIT_RESOURCES.USER,
       resourceId: `user_${Date.now()}`,
       resourceName: targetUserName,
       details: `Changed user permissions from ${oldPermission} to ${newPermission}`
-    }),
+    }));
+  },
 
-  userCreated: (userName: string, userEmail: string, currentUser?: { id: string; name: string; email: string }) =>
-    addAuditLog({
+  userCreated: (userName: string, userEmail: string, currentUser?: { id: string; name: string; email: string }) => {
+    const key = `user-created-${userEmail}`;
+    return debounceAuditLog(key, () => addAuditLog({
       action: AUDIT_ACTIONS.CREATE_USER,
       resource: AUDIT_RESOURCES.USER,
       resourceId: `user_${Date.now()}`,
       resourceName: userName,
       details: `Created new user: ${userEmail}`
-    }, currentUser),
+    }, currentUser));
+  },
 
-  userDeleted: (userName: string, currentUser?: { id: string; name: string; email: string }) =>
-    addAuditLog({
+  userDeleted: (userName: string, currentUser?: { id: string; name: string; email: string }) => {
+    const key = `user-deleted-${userName}`;
+    return debounceAuditLog(key, () => addAuditLog({
       action: AUDIT_ACTIONS.DELETE_USER,
       resource: AUDIT_RESOURCES.USER,
       resourceId: `user_${Date.now()}`,
       resourceName: userName,
       details: 'Deleted user account'
-    }, currentUser),
+    }, currentUser));
+  },
 
   userViewed: (userName: string, userEmail: string) =>
     addAuditLog({
