@@ -160,3 +160,54 @@ export const sendNewUserWelcomeEmail = async (
     return false;
   }
 };
+
+// Send password update notification email
+export const sendPasswordUpdateEmail = async (
+  userEmail: string,
+  userName: string,
+  password: string,
+  loginUrl: string = '/login'
+): Promise<boolean> => {
+  try {
+    // Verify email configuration first
+    if (!emailConfig.auth.user || !emailConfig.auth.pass) {
+      console.error('Email configuration missing: SMTP_USER or SMTP_PASS not set');
+      return false;
+    }
+
+    const template = loadTemplate('password-updated');
+    
+    const html = template({
+      userEmail,
+      userName,
+      password,
+      loginUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}${loginUrl}`,
+    });
+
+    const mailOptions = {
+      from: `"Cambria Portal" <${emailConfig.auth.user}>`,
+      to: userEmail,
+      subject: 'Password Updated - Cambria Portal',
+      html,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Password update email sent successfully to ${userEmail}`);
+    return true;
+  } catch (error) {
+    console.error('Error sending password update email:', error);
+    
+    // Provide more specific error information
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'EAUTH') {
+        console.error('Authentication failed - check SMTP credentials');
+      } else if (error.code === 'ECONNECTION') {
+        console.error('Connection failed - check SMTP host and port');
+      } else if (error.code === 'ETIMEDOUT') {
+        console.error('Connection timeout - check network or SMTP settings');
+      }
+    }
+    
+    return false;
+  }
+};

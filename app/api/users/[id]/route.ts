@@ -89,6 +89,7 @@ export async function PUT(
 
     // Handle password update if provided
     let updateData = { ...body };
+    let plainPassword = null;
     if (body.password) {
       try {
         const { hashPassword } = await import('@/lib/auth');
@@ -98,6 +99,8 @@ export async function PUT(
           passwordHash: hashedPassword.hash,
           passwordSalt: hashedPassword.salt
         };
+        // Store plain password for email notification
+        plainPassword = body.password;
         // Remove plain password from update data
         delete updateData.password;
         console.log(`🔐 Password updated for user: ${existingUser.email}`);
@@ -113,6 +116,27 @@ export async function PUT(
     // Update user
     await usersService.update(id, updateData);
     console.log(`✅ User updated successfully: ${existingUser.email}`);
+
+    // Send password update email if password was changed
+    if (plainPassword) {
+      try {
+        const { sendPasswordUpdateEmail } = await import('@/lib/email');
+        const emailSent = await sendPasswordUpdateEmail(
+          existingUser.email,
+          existingUser.name,
+          plainPassword
+        );
+        
+        if (emailSent) {
+          console.log(`📧 Password update email sent to: ${existingUser.email}`);
+        } else {
+          console.warn(`⚠️ Failed to send password update email to: ${existingUser.email}`);
+        }
+      } catch (error) {
+        console.error('Error sending password update email:', error);
+        // Don't fail the request if email fails
+      }
+    }
 
     return NextResponse.json({
       success: true,

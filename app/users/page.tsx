@@ -15,6 +15,7 @@ interface User {
   role: 'admin' | 'basic';
   status: 'active' | 'inactive';
   lastLogin?: string | null;
+  clientPermissions?: any[];
   created_at?: Date;
   updated_at?: Date;
 }
@@ -82,6 +83,14 @@ export default function UsersPage() {
       
       if (data.authenticated) {
         setUser(data.user);
+        
+        // Check if user is admin
+        if (data.user.role !== 'admin') {
+          alert('Access denied. Admin privileges required.');
+          router.push('/');
+          return;
+        }
+        
         fetchUsers();
       } else {
         router.push('/login');
@@ -138,6 +147,11 @@ export default function UsersPage() {
   };
 
   const handleAddUser = () => {
+    if (!canManageUsers()) {
+      alert('You do not have permission to add users.');
+      return;
+    }
+    
     setFormData({
       email: '',
       name: '',
@@ -150,6 +164,11 @@ export default function UsersPage() {
   };
 
   const handleEditUser = (user: User) => {
+    if (!canEditUser(user)) {
+      alert('You do not have permission to edit users.');
+      return;
+    }
+    
     console.log('📝 Editing user:', user);
     console.log('📝 User client permissions:', user.clientPermissions);
     
@@ -184,8 +203,9 @@ export default function UsersPage() {
       };
 
       // Only include password if it's being changed (for new users or when explicitly changing)
+      let finalPassword = '';
       if (!editingUser || formData.generatePassword || formData.password !== '') {
-        let finalPassword = formData.password;
+        finalPassword = formData.password;
         if (formData.generatePassword) {
           finalPassword = generateRandomPassword();
         }
@@ -234,11 +254,19 @@ export default function UsersPage() {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    const user = users.find(u => u.id === userId);
-    if (user) {
-      setUserToDelete(user);
-      setShowDeleteDialog(true);
+    const targetUser = users.find(u => u.id === userId);
+    if (!targetUser) {
+      alert('User not found.');
+      return;
     }
+    
+    if (!canDeleteUser(targetUser)) {
+      alert('You do not have permission to delete users.');
+      return;
+    }
+    
+    setUserToDelete(targetUser);
+    setShowDeleteDialog(true);
   };
 
   const confirmDeleteUser = async () => {
@@ -273,6 +301,17 @@ export default function UsersPage() {
   };
 
   const handleToggleUserStatus = async (userId: string, currentStatus: string) => {
+    const targetUser = users.find(u => u.id === userId);
+    if (!targetUser) {
+      alert('User not found.');
+      return;
+    }
+    
+    if (!canToggleUserStatus(targetUser)) {
+      alert('You do not have permission to toggle user status.');
+      return;
+    }
+    
     try {
       const response = await fetch(`/api/users/${userId}`, {
         method: 'PUT',
@@ -299,6 +338,11 @@ export default function UsersPage() {
   };
 
   const handleManagePermissions = (user: User) => {
+    if (!canManagePermissions(user)) {
+      alert('You do not have permission to manage user permissions.');
+      return;
+    }
+    
     setSelectedUserForPermissions(user);
     setShowClientPermissions(true);
   };
@@ -331,6 +375,31 @@ export default function UsersPage() {
     }
     
     setUserClientPermissions(newPermissions);
+  };
+
+  // Permission check functions
+  const canManageUsers = () => {
+    return user?.role === 'admin';
+  };
+
+  const canEditUser = (targetUser: User) => {
+    // Only admins can edit users
+    return user?.role === 'admin';
+  };
+
+  const canDeleteUser = (targetUser: User) => {
+    // Only admins can delete users
+    return user?.role === 'admin';
+  };
+
+  const canToggleUserStatus = (targetUser: User) => {
+    // Only admins can toggle user status
+    return user?.role === 'admin';
+  };
+
+  const canManagePermissions = (targetUser: User) => {
+    // Only admins can manage permissions
+    return user?.role === 'admin';
   };
 
   const filteredUsers = users.filter(user =>
@@ -421,15 +490,17 @@ export default function UsersPage() {
                     <h2 className="text-2xl font-bold text-gray-900 mb-1">User Accounts</h2>
                     <p className="text-gray-600">Manage user access and permissions</p>
                   </div>
-                  <button
-                    onClick={handleAddUser}
-                    className="ml-4 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-xl hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transform transition-all duration-200 hover:scale-105 shadow-lg flex items-center"
-                  >
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                    Add User
-                  </button>
+                  {canManageUsers() && (
+                    <button
+                      onClick={handleAddUser}
+                      className="ml-4 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-xl hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transform transition-all duration-200 hover:scale-105 shadow-lg flex items-center"
+                    >
+                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Add User
+                    </button>
+                  )}
                 </div>
                 
                 {/* Enhanced Search Bar */}
@@ -510,51 +581,63 @@ export default function UsersPage() {
                             {userItem.lastLogin ? new Date(userItem.lastLogin).toLocaleDateString() : 'Never'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-center">
-                            <div className="flex items-center justify-center space-x-2">
-                              <button
-                                onClick={() => handleEditUser(userItem)}
-                                className="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition-all duration-200"
-                                title="Edit user"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              
-                              <button
-                                onClick={() => handleManagePermissions(userItem)}
-                                className="text-green-600 hover:text-green-800 p-2 rounded-lg hover:bg-green-50 transition-all duration-200"
-                                title="Manage permissions"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-                                </svg>
-                              </button>
-                              
-                              <button
-                                onClick={() => handleToggleUserStatus(userItem.id!, userItem.status)}
-                                className={`p-2 rounded-lg transition-all duration-200 ${
-                                  userItem.status === 'active'
-                                    ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
-                                    : 'text-green-600 hover:text-green-800 hover:bg-green-50'
-                                }`}
-                                title={userItem.status === 'active' ? 'Deactivate user' : 'Activate user'}
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                              </button>
-                              
-                              <button
-                                onClick={() => handleDeleteUser(userItem.id!)}
-                                className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition-all duration-200"
-                                title="Delete user"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
+                            {canManageUsers() ? (
+                              <div className="flex items-center justify-center space-x-2">
+                                {canEditUser(userItem) && (
+                                  <button
+                                    onClick={() => handleEditUser(userItem)}
+                                    className="text-blue-600 hover:text-blue-800 p-2 rounded-lg hover:bg-blue-50 transition-all duration-200"
+                                    title="Edit user"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                  </button>
+                                )}
+                                
+                                {canManagePermissions(userItem) && (
+                                  <button
+                                    onClick={() => handleManagePermissions(userItem)}
+                                    className="text-green-600 hover:text-green-800 p-2 rounded-lg hover:bg-green-50 transition-all duration-200"
+                                    title="Manage permissions"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                    </svg>
+                                  </button>
+                                )}
+                                
+                                {canToggleUserStatus(userItem) && (
+                                  <button
+                                    onClick={() => handleToggleUserStatus(userItem.id!, userItem.status)}
+                                    className={`p-2 rounded-lg transition-all duration-200 ${
+                                      userItem.status === 'active'
+                                        ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
+                                        : 'text-green-600 hover:text-green-800 hover:bg-green-50'
+                                    }`}
+                                    title={userItem.status === 'active' ? 'Deactivate user' : 'Activate user'}
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                  </button>
+                                )}
+                                
+                                {canDeleteUser(userItem) && (
+                                  <button
+                                    onClick={() => handleDeleteUser(userItem.id!)}
+                                    className="text-red-600 hover:text-red-800 p-2 rounded-lg hover:bg-red-50 transition-all duration-200"
+                                    title="Delete user"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-gray-400">No permissions</span>
+                            )}
                           </td>
                         </tr>
                       ))}

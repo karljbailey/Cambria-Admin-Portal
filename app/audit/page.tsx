@@ -82,6 +82,14 @@ export default function AuditPage() {
       
       if (data.authenticated) {
         setUser(data.user);
+        
+        // Check if user is admin
+        if (data.user.role !== 'admin') {
+          alert('Access denied. Admin privileges required.');
+          router.push('/');
+          return;
+        }
+        
         fetchAuditLogs();
       } else {
         router.push('/login');
