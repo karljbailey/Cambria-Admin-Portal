@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       range: updateRange,
       valueInputOption: 'RAW',
       requestBody: {
-        values: [['FALSE']]
+        values: [['TRUE']]
       }
     });
 
