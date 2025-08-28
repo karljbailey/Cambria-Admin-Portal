@@ -1,0 +1,42 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="url(#bg-gradient)"/>
+  
+  <!-- Background Pattern -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  
+  <!-- Main Content -->
+  <g transform="translate(100, 150)">
+    <!-- Logo/Icon -->
+    <rect x="0" y="0" width="80" height="80" rx="16" fill="url(#logo-gradient)"/>
+    <path d="M20 30L40 20L60 30V50L40 60L20 50V30Z" fill="white" fill-opacity="0.9"/>
+    <path d="M40 20V60" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <path d="M20 30L60 30" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <path d="M20 50L60 50" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="40" cy="40" r="6" fill="white"/>
+    
+    <!-- Text -->
+    <text x="100" y="35" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="bold" fill="white">Cambria Portal</text>
+    <text x="100" y="65" font-family="system-ui, -apple-system, sans-serif" font-size="24" fill="rgba(255,255,255,0.8)">Client Management Dashboard</text>
+  </g>
+  
+  <!-- Bottom Text -->
+  <text x="100" y="500" font-family="system-ui, -apple-system, sans-serif" font-size="18" fill="rgba(255,255,255,0.7)">Professional client management and performance monitoring</text>
+  
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1E40AF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#3B82F6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E40AF;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E40AF;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+</svg>
