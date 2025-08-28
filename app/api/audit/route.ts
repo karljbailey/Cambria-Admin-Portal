@@ -141,7 +141,16 @@ export async function GET(request: NextRequest) {
 
     // Get unique values for filters
     const actions = [...new Set(logs.map(log => log.action))];
-    const users = [...new Set(logs.map(log => ({ id: log.userId, name: log.userName, email: log.userEmail })))];
+    
+    // Deduplicate users using a Map with userId as key
+    const usersMap = new Map();
+    logs.forEach(log => {
+      if (!usersMap.has(log.userId)) {
+        usersMap.set(log.userId, { id: log.userId, name: log.userName, email: log.userEmail });
+      }
+    });
+    const users = Array.from(usersMap.values());
+    
     const resources = [...new Set(logs.map(log => log.resource))];
 
     return NextResponse.json({
