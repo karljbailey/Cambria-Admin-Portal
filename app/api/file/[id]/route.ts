@@ -498,6 +498,21 @@ function parseProductPerformanceData(sheetData: unknown[][], result: ParsedData)
     return;
   }
   
+  // Store raw data for Product Performance
+  const rawHeaders = sheetData[0].map((h: unknown) => String(h || '').trim());
+  const rawData = sheetData.slice(1).map(row => 
+    row.map(cell => String(cell || '').trim())
+  );
+  
+  result.rawProductPerformance = {
+    headers: rawHeaders,
+    rawData: rawData
+  };
+  console.log('Stored raw product performance data:', {
+    headers: rawHeaders,
+    dataRows: rawData.length
+  });
+  
   const headers = sheetData[0].map((h: unknown) => String(h || '').toLowerCase());
   console.log('Product headers:', headers);
   

@@ -66,6 +66,11 @@ interface MonthlyReport {
     cvrThisMonth: number;
     cvrChange: string;
   }>;
+  // Add raw product performance data
+  rawProductPerformance?: {
+    headers: string[];
+    rawData: string[][];
+  };
   payouts: {
     latest: number;
     previous: number;
@@ -497,6 +502,13 @@ export default function ClientPage() {
       return isNaN(num) ? 0 : num;
     }
     return 0;
+  };
+
+  // Helper function to clean up quoted strings for display
+  const cleanQuotedString = (value: string): string => {
+    if (!value) return value;
+    // Remove surrounding quotes and replace escaped quotes
+    return value.replace(/^"(.*)"$/, '$1').replace(/""/g, '"');
   };
 
   // Extract folder ID from Google Drive URL
@@ -1528,25 +1540,63 @@ export default function ClientPage() {
                             Product Performance
                           </h4>
                           <span className="text-sm font-semibold text-gray-700 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-xl border border-white/20 shadow-sm">
-                            {selectedReport.productPerformance.length} products
+                            {selectedReport.rawProductPerformance ? selectedReport.rawProductPerformance.rawData.length : selectedReport.productPerformance.length} products
                           </span>
                         </div>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-100">
-                          <thead className="bg-white/50 backdrop-blur-sm">
-                            <tr>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Product</th>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ASIN</th>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Sales</th>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Net Profit</th>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Margin</th>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Units</th>
-                              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ACoS</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white/30 backdrop-blur-sm divide-y divide-gray-100">
-                                                          {selectedReport.productPerformance.map((product, index) => (
+                        {selectedReport.rawProductPerformance ? (
+                          // Show raw table data
+                          <table className="min-w-full divide-y divide-gray-100">
+                            <thead className="bg-white/50 backdrop-blur-sm">
+                              <tr>
+                                                               {selectedReport.rawProductPerformance.headers.map((header, index) => (
+                                 <th key={index} className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                   {cleanQuotedString(header)}
+                                 </th>
+                               ))}
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white/30 backdrop-blur-sm divide-y divide-gray-100">
+                                                             {selectedReport.rawProductPerformance.rawData.map((row, rowIndex) => (
+                                 <tr key={rowIndex} className="hover:bg-white/80 transition-colors duration-200">
+                                   {row.map((cell, cellIndex) => (
+                                     <td key={cellIndex} className="px-6 py-4">
+                                       <div className="text-sm text-gray-900">
+                                         {cellIndex === 1 ? (
+                                           // For title column, allow wrapping and show full text on hover
+                                           <div className="max-w-xs">
+                                             <p className="truncate" title={cleanQuotedString(cell)}>
+                                               {cleanQuotedString(cell)}
+                                             </p>
+                                           </div>
+                                         ) : (
+                                           // For other columns, keep as-is
+                                           <span className="whitespace-nowrap">{cleanQuotedString(cell)}</span>
+                                         )}
+                                       </div>
+                                     </td>
+                                   ))}
+                                 </tr>
+                               ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          // Fallback to parsed data if raw data not available
+                          <table className="min-w-full divide-y divide-gray-100">
+                            <thead className="bg-white/50 backdrop-blur-sm">
+                              <tr>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Product</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ASIN</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Sales</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Net Profit</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Margin</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Units</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ACoS</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white/30 backdrop-blur-sm divide-y divide-gray-100">
+                              {selectedReport.productPerformance.map((product, index) => (
                                 <tr key={index} className="hover:bg-white/80 transition-colors duration-200">
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <div className="flex items-center">
@@ -1594,6 +1644,7 @@ export default function ClientPage() {
                             ))}
                           </tbody>
                         </table>
+                        )}
                       </div>
                     </div>
 

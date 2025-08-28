@@ -1,5 +1,10 @@
 // CSV parsing utilities for Monthly Reports Dashboard
 
+export interface RawProductPerformance {
+  rawData: string[][]; // Raw table data as 2D array
+  headers: string[]; // Column headers
+}
+
 export interface ParsedData {
   profitLoss: {
     sales: number | string;
@@ -39,6 +44,8 @@ export interface ParsedData {
     cvrThisMonth: number | string;
     cvrChange: string;
   }>;
+  // Add raw product performance data
+  rawProductPerformance?: RawProductPerformance;
   payouts: {
     latest: number | string;
     previous: number | string;
@@ -132,24 +139,6 @@ export function parseCSVLine(line: string): string[] {
   // Add the last cell
   cells.push(currentCell.trim());
   
-  // Post-process to handle unquoted fields with commas (like currency values)
-  if (cells.length > 2) {
-    // If we have more than 2 cells, try to reconstruct the original line
-    // This handles cases like "Revenue,$1,234.56" being split into ["Revenue", "$1", "234.56"]
-    const firstCell = cells[0];
-    const remainingCells = cells.slice(1);
-    
-    // Check if the first cell looks like a metric name and the remaining cells look like a value
-    const metricKeywords = ['revenue', 'sales', 'income', 'profit', 'cost', 'margin', 'fees', 'expenses', 'refunds', 'roi', 'latest', 'previous', 'average', 'current', 'earnings', 'payout', 'last', 'month'];
-    const isMetricName = metricKeywords.some(keyword => firstCell.toLowerCase().includes(keyword));
-    
-    if (isMetricName && remainingCells.length > 1) {
-      // Reconstruct the value by joining the remaining cells
-      const reconstructedValue = remainingCells.join(',');
-      return [firstCell, reconstructedValue];
-    }
-  }
-  
   return cells;
 }
 
@@ -214,6 +203,16 @@ export function parseSections(sections: { [key: string]: string[][] }): ParsedDa
     }
   }
 
+  // Check for raw product data stored during parsing
+  if ((sections as any)['_rawProductData']) {
+    const rawData = (sections as any)['_rawProductData'];
+    result.rawProductPerformance = {
+      headers: rawData.headers,
+      rawData: rawData.rawData
+    };
+    console.log('Applied raw product performance data from inferred section');
+  }
+
   // Parse Product Performance sections (handle multiple sections)
   const productPerformanceSections = findAllSectionsByKeywords(sections, sectionMappings.productPerformance);
   if (productPerformanceSections.length > 0) {
@@ -246,6 +245,23 @@ export function parseSections(sections: { [key: string]: string[][] }): ParsedDa
           dataRows = productPerformanceSection.slice(1).filter(row => Array.isArray(row)) as string[][];
           console.log('Using first row as header:', headerRow);
         }
+      }
+      
+      // Store raw data for Product Performance
+      if (productPerformanceSection.length > 0) {
+        const rawHeaders = productPerformanceSection[0].map(cell => String(cell || '').trim());
+        const rawData = productPerformanceSection.slice(1).map(row => 
+          row.map(cell => String(cell || '').trim())
+        );
+        
+        result.rawProductPerformance = {
+          headers: rawHeaders,
+          rawData: rawData
+        };
+        console.log('Stored raw product performance data:', {
+          headers: rawHeaders,
+          dataRows: rawData.length
+        });
       }
     
     // Dynamic column mapping
@@ -486,9 +502,47 @@ export function parseCSV(csvContent: string): ParsedData {
       return createEmptyParsedData();
     }
 
-    // Normalize line endings and split into lines
+    // Normalize line endings
     const normalizedContent = csvContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalizedContent.split('\n').filter(line => line.trim());
+    
+    // Split into lines but preserve quoted fields that span multiple lines
+    const lines: string[] = [];
+    let currentLine = '';
+    let insideQuotes = false;
+    
+    for (let i = 0; i < normalizedContent.length; i++) {
+      const char = normalizedContent[i];
+      
+      if (char === '"') {
+        if (insideQuotes) {
+          // Check for escaped quote
+          if (i + 1 < normalizedContent.length && normalizedContent[i + 1] === '"') {
+            currentLine += '"';
+            i++; // Skip the next quote
+          } else {
+            // End of quoted field
+            insideQuotes = false;
+          }
+        } else {
+          // Start of quoted field
+          insideQuotes = true;
+        }
+        currentLine += char;
+      } else if (char === '\n' && !insideQuotes) {
+        // End of line (only if not inside quotes)
+        if (currentLine.trim()) {
+          lines.push(currentLine.trim());
+        }
+        currentLine = '';
+      } else {
+        currentLine += char;
+      }
+    }
+    
+    // Add the last line if it has content
+    if (currentLine.trim()) {
+      lines.push(currentLine.trim());
+    }
     
     const sections: { [key: string]: string[][] } = {};
     let currentSection = '';
@@ -566,6 +620,37 @@ export function parseCSV(csvContent: string): ParsedData {
       if (headers.some(h => h.includes('asin') || h.includes('product') || h.includes('title'))) {
         sections['Per-Product Performance'] = lines.map(line => parseCSVLine(line));
         console.log('Inferred product performance section from headers');
+      }
+      
+      // Also check for the specific format you mentioned (ASIN, Title, Sales_LastMonth, etc.)
+      const hasAsinHeader = headers.some(h => h.toLowerCase().includes('asin'));
+      const hasTitleHeader = headers.some(h => h.toLowerCase().includes('title'));
+      const hasSalesHeader = headers.some(h => h.toLowerCase().includes('sales'));
+      
+      if (hasAsinHeader && hasTitleHeader && hasSalesHeader) {
+        sections['Product Performance'] = lines.map(line => parseCSVLine(line));
+        console.log('Inferred product performance section from ASIN/Title/Sales headers');
+      }
+      
+      // If we have any sections now, also store raw data for the first product section
+      if (Object.keys(sections).length > 0) {
+        const firstProductSection = Object.values(sections)[0];
+        if (firstProductSection && firstProductSection.length > 0) {
+          const rawHeaders = firstProductSection[0].map(cell => String(cell || '').trim());
+          const rawData = firstProductSection.slice(1).map(row => 
+            row.map(cell => String(cell || '').trim())
+          );
+          
+          // Store raw data in a special key for later processing
+          (sections as any)['_rawProductData'] = {
+            headers: rawHeaders,
+            rawData: rawData
+          };
+          console.log('Stored raw product performance data from inferred section:', {
+            headers: rawHeaders,
+            dataRows: rawData.length
+          });
+        }
       }
     }
     
